@@ -20,7 +20,7 @@ const QZ_STATUT = { brouillon: '<span class="pill draft">Brouillon</span>', publ
 
 /* ---------- Service d'IA (API compatible OpenAI : OpenRouter, Alibaba Cloud Model Studio, …) ---------- */
 const IA_PRESETS = {
-  openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "qwen/qwen3-next-80b-a3b-instruct:free",
+  openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "qwen/qwen3-30b-a3b:free",
     aide: "Créez un compte sur openrouter.ai, puis une clé dans « Keys ». Les modèles se terminant par « :free » sont gratuits (avec une limite de requêtes par jour)." },
   dashscope: { nom: "Alibaba Cloud Model Studio — Qwen officiel", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus",
     aide: "Clé API Model Studio (DashScope), région internationale. Modèles : qwen-plus, qwen-max, qwen-turbo…" },
@@ -51,6 +51,8 @@ const IA = {
       let m = `erreur ${res.status}`;
       try { const j = await res.json(); const er = j.error || j; m += " — " + (er.message || er.code || JSON.stringify(er)).toString().slice(0, 240); } catch { }
       if (res.status === 401 || res.status === 403) m += " (clé API refusée)";
+      if (res.status === 404) m += " (modèle indisponible : changez de modèle dans les paramètres de l'IA)";
+      if (res.status === 402) m += " (crédit insuffisant sur le compte du service d'IA)";
       if (res.status === 429) m += " (trop de requêtes : réessayez dans une minute ou changez de modèle)";
       throw new Error(m);
     }
@@ -141,7 +143,9 @@ function IASettingsForm(c, { perso } = {}) {
   return `<div class="form-grid">
     <div class="full"><label>Service</label><select name="provider">${Object.entries(IA_PRESETS).map(([k, p]) => `<option value="${k}" ${k === prov ? "selected" : ""}>${esc(p.nom)}</option>`).join("")}</select><div class="hint" id="ia-aide">${esc(IA_PRESETS[prov].aide)}</div></div>
     <div><label>Adresse de l'API</label><input name="baseUrl" value="${esc(c.baseUrl || IA_PRESETS[prov].baseUrl)}" placeholder="https://…/v1"></div>
-    <div><label>Modèle</label><input name="model" value="${esc(c.model || IA_PRESETS[prov].model)}" placeholder="ex. qwen-plus"></div>
+    <div><label>Modèle</label><input name="model" list="ia-models" value="${esc(c.model || IA_PRESETS[prov].model)}" placeholder="ex. qwen-plus">
+      <datalist id="ia-models"><option value="qwen/qwen3-30b-a3b:free">Qwen3 30B — gratuit (OpenRouter)</option><option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B — payant, très bon marché (OpenRouter)</option><option value="qwen-plus">qwen-plus (Model Studio)</option><option value="qwen-max">qwen-max (Model Studio)</option></datalist>
+      <div class="hint">Les modèles gratuits « :free » changent souvent ; si l'un est retiré, choisissez-en un autre dans la liste.</div></div>
     <div class="full"><label>Clé API</label><input name="apiKey" type="password" autocomplete="off" value="${esc(c.apiKey)}" placeholder="sk-…"><div class="hint">${perso ? "Enregistrée uniquement dans ce navigateur." : "Visible par les enseignants et l'administration uniquement (jamais par les étudiants)."} Fixez une limite de dépense sur le compte du service.</div></div></div>`;
 }
 function bindIAForm(root) {
