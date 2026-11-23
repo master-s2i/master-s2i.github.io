@@ -20,7 +20,7 @@ const QZ_STATUT = { brouillon: '<span class="pill draft">Brouillon</span>', publ
 
 /* ---------- Service d'IA (API compatible OpenAI : OpenRouter, Alibaba Cloud Model Studio, …) ---------- */
 const IA_PRESETS = {
-  openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "qwen/qwen3-30b-a3b:free",
+  openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "google/gemma-4-31b-it:free",
     aide: "Créez un compte sur openrouter.ai, puis une clé dans « Keys ». Les modèles se terminant par « :free » sont gratuits (avec une limite de requêtes par jour)." },
   dashscope: { nom: "Alibaba Cloud Model Studio — Qwen officiel", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus",
     aide: "Clé API Model Studio (DashScope), région internationale. Modèles : qwen-plus, qwen-max, qwen-turbo…" },
@@ -144,7 +144,7 @@ function IASettingsForm(c, { perso } = {}) {
     <div class="full"><label>Service</label><select name="provider">${Object.entries(IA_PRESETS).map(([k, p]) => `<option value="${k}" ${k === prov ? "selected" : ""}>${esc(p.nom)}</option>`).join("")}</select><div class="hint" id="ia-aide">${esc(IA_PRESETS[prov].aide)}</div></div>
     <div><label>Adresse de l'API</label><input name="baseUrl" value="${esc(c.baseUrl || IA_PRESETS[prov].baseUrl)}" placeholder="https://…/v1"></div>
     <div><label>Modèle</label><input name="model" list="ia-models" value="${esc(c.model || IA_PRESETS[prov].model)}" placeholder="ex. qwen-plus">
-      <datalist id="ia-models"><option value="qwen/qwen3-30b-a3b:free">Qwen3 30B — gratuit (OpenRouter)</option><option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B — payant, très bon marché (OpenRouter)</option><option value="qwen-plus">qwen-plus (Model Studio)</option><option value="qwen-max">qwen-max (Model Studio)</option></datalist>
+      <datalist id="ia-models"><option value="google/gemma-4-31b-it:free">Gemma 4 31B — gratuit (OpenRouter)</option><option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra — gratuit (OpenRouter)</option><option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B — payant, très bon marché (OpenRouter)</option><option value="qwen-plus">qwen-plus (Model Studio)</option><option value="qwen-max">qwen-max (Model Studio)</option></datalist>
       <div class="hint">Les modèles gratuits « :free » changent souvent ; si l'un est retiré, choisissez-en un autre dans la liste.</div></div>
     <div class="full"><label>Clé API</label><input name="apiKey" type="password" autocomplete="off" value="${esc(c.apiKey)}" placeholder="sk-…"><div class="hint">${perso ? "Enregistrée uniquement dans ce navigateur." : "Visible par les enseignants et l'administration uniquement (jamais par les étudiants)."} Fixez une limite de dépense sur le compte du service.</div></div></div>`;
 }
