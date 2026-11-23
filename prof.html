@@ -17,8 +17,11 @@
 <script src="assets/js/firebase-config.js"></script>
 <script src="assets/js/data.js"></script>
 <script src="assets/js/core.js"></script>
+<script src="assets/js/excel.js"></script>
 <script src="assets/js/components.js"></script>
+<script src="assets/js/mailer.js"></script>
 <script src="assets/js/contenus.js"></script>
+<script src="assets/js/quiz.js"></script>
 <script src="assets/js/visio.js"></script>
 <script src="assets/js/rappels.js"></script>
 <script>
@@ -54,6 +57,7 @@
     { id: "visio", label: "Séances à distance", render: (el) => ProfVisioView(el, { user, modules: mods, profId: user.id }) },
     { id: "absences", label: "Absences", badge: () => profPending(user.id).filter((x) => x.reminded).length, render: (el) => AttendanceView(el, { modules: mods, profId: user.id }) },
     { id: "contenus", label: "Contenus pédagogiques", render: (el) => ContentsView(el, { modules: mods, profId: user.id, user }) },
+    { id: "quiz", label: "Quiz", render: (el) => QuizView(el, { modules: mods, profId: user.id, user }) },
     { id: "messagerie", label: "Messagerie", badge: () => Chat.totalUnread(ctxUser, channels), render: (el) => ChatView(el, { user: ctxUser, role: "prof", channels, onRead: () => refreshBadges(views) }) },
     { id: "edt", label: "Emploi du temps", render: (el) => TimetableView(el, { sections: sectionsMine, profId: user.id, title: "Mon emploi du temps" }) },
     { id: "examens", label: "Examens & soutenances", render: (el) => ExamsView(el, { sections: sectionsMine }) },

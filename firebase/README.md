@@ -28,6 +28,10 @@ Chaque collection Firestore correspond à une fonction du site. L'identifiant du
 | `contents` | Contenus pédagogiques, organisés en rubriques (Cours, TP, TD, Mise à niveau) et sous-dossiers | `module`, `titre`, `description`, `lien`, `dossiers[]` ({`id`, `rubrique`, `nom`}), `sections[]`, `statut` (`publie`, `brouillon`, `desactive`), `dateLimite`, `profId` |
 | `fichiers` | Documents des contenus (fiches) | `contentId`, `dossierId`, `rubrique` (`cours`, `tp`, `td`, `man`), `module`, `profId`, `statut` (recopié du contenu), `nom`, `taille`, `mime`, `parts`, `createdAt` |
 | `fichiers_data` | Contenu des documents, en morceaux base64 de moins de 1 Mo | `fileId`, `i`, `contentId`, `data` (identifiant du document : `<idFichier>_<n>`) |
+| `quiz` | Quiz (sans les bonnes réponses) | `module`, `titre`, `sections[]`, `questions[]` ({`id`, `type`, `enonce`, `choix[]`, `points`}), `ouverture`, `fermeture`, `ouvertureMs`, `fermetureMs`, `duree`, `tentatives`, `corrige`, `statut` (`brouillon`, `publie`, `ferme`), `profId` |
+| `quiz_corriges` | Bonnes réponses et explications d'un quiz (même identifiant que le quiz) | `quizId`, `reponses` {idQuestion: {`bonnes[]`, `explication`}}, `profId`, `module` |
+| `quiz_reponses` | Copies des étudiants (identifiant `idQuiz_idÉtudiant_n`) | `quizId`, `studentId`, `section`, `tentative`, `debut`, `fin`, `reponses` {idQuestion: [indices]} |
+| `config/ia` | Service d'IA des quiz (lisible par les enseignants et l'administration) | `provider`, `baseUrl`, `model`, `apiKey` |
 | `messages` | Messagerie par module et section | `module` (`ALL` = annonces), `section`, `authorRole`, `authorId`, `authorUid`, `authorName`, `text`, `date` |
 | `notifications` | Notifications ciblées (Planning) | `titre`, `categorie`, `message`, `lien`, `formation`, `promotions[]`, `annee`, `publishAt` |
 | `exams` | Calendrier des examens | `section`, `module`, `type`, `date`, `debut`, `fin`, `salle` |

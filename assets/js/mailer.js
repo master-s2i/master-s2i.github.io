@@ -189,3 +189,62 @@ function bindMailSettings(el) {
   };
   $("#tplreset", el).onclick = () => { if (UI.confirm("Revenir aux modèles par défaut ?")) { delete Store.settings().mailTemplates; Store.saveSettings(); location.reload(); } };
 }
+
+/* ==========================================================================
+   Listes de diffusion par section (une adresse par formation et par année)
+   Utilisées pour : contenu publié, nouvel emploi du temps, séance à distance, quiz publié.
+   Envoi automatique via EmailJS si configuré ; sinon e-mail prérempli (mailto).
+   ========================================================================== */
+const DIFFUSION_DEFAULTS = { "TN-1A": "S2I_TN_1A_2627@um5.ac.ma", "TAM-1A": "S2I_TAM_1A_2627@um5.ac.ma", "TN-2A": "", "TAM-2A": "" };
+const Diffusion = {
+  lists() { const s = (Store.settings() || {}).diffusion || {}; const o = {}; S2I.sections.forEach((k) => (o[k] = (k in s ? s[k] : DIFFUSION_DEFAULTS[k] || "").trim())); return o; },
+  enabled() { return (Store.settings() || {}).diffusionOff !== true; },
+  targets(sections) { const l = this.lists(); return [...new Set((sections || []).map((s) => l[s]).filter(Boolean))]; },
+  /* { sections, subject, body } */
+  async send({ sections, subject, body }) {
+    if (!this.enabled()) return;
+    const to = this.targets(sections); if (!to.length) return;
+    const full = `${body}\n\n—\nPlateforme du Master S2I : ${siteBase()}\nCe message est envoyé automatiquement par la plateforme.`;
+    const subj = subject.startsWith("[Master S2I]") ? subject : `[Master S2I] ${subject}`;
+    if (typeof Mailer !== "undefined" && Mailer.configured()) {
+      const ko = [];
+      for (const addr of to) {
+        try { await Mailer.sendOne({ to: addr, toName: "Étudiants du Master S2I", subject: subj, body: full }); }
+        catch (e) { ko.push(addr); console.error(e); }
+      }
+      const ok = to.filter((a) => !ko.includes(a));
+      if (ok.length) Journal.log("E-mail de diffusion", `${subj} → ${ok.join(", ")}`, { objet: "Liste de diffusion" });
+      UI.toast(ko.length ? `E-mail non envoyé à : ${ko.join(", ")}${ok.length ? ` (envoyé à ${ok.join(", ")})` : ""}.` : `📧 E-mail envoyé à ${ok.join(" et ")}.`);
+      return;
+    }
+    /* Sans envoi automatique : message prérempli à ouvrir dans la messagerie */
+    const href = `mailto:${to.join(",")}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(full)}`;
+    const md = UI.modal({
+      title: "Prévenir les étudiants par e-mail",
+      body: `<p>Listes de diffusion : <b>${to.map(esc).join("</b>, <b>")}</b></p>
+        <p class="muted">L'envoi automatique n'est pas configuré (Administration › Paramètres › Envoi des e-mails). Cliquez sur « Ouvrir l'e-mail » : le message s'ouvre prérempli dans votre messagerie.</p>
+        <div style="white-space:pre-wrap;border:1px solid var(--line);border-radius:4px;padding:10px;max-height:260px;overflow:auto;font-size:13.5px"><b>${esc(subj)}</b>\n\n${esc(full)}</div>
+        <p style="margin-top:12px"><a class="btn" id="dif-open" href="${esc(href)}">📧 Ouvrir l'e-mail</a></p>`
+    });
+    $("#dif-open", md).addEventListener("click", () => { Journal.log("E-mail de diffusion (messagerie)", `${subj} → ${to.join(", ")}`, { objet: "Liste de diffusion" }); setTimeout(() => md.remove(), 300); });
+  }
+};
+
+function DiffusionSettingsCard() {
+  const l = Diffusion.lists();
+  return `<div class="card" style="grid-column:1/-1"><h3>Listes de diffusion des étudiants</h3>
+    <p class="muted">Pour chaque section, l'adresse de la liste de diffusion de la promotion. Elle est utilisée pour prévenir les étudiants par e-mail quand un contenu ou un quiz est publié, quand une séance à distance est créée et quand l'emploi du temps est annoncé.
+      Laissez vide pour ne rien envoyer à une section. La liste doit accepter les messages venant de l'adresse d'envoi (EmailJS ou votre messagerie).</p>
+    <form id="difcfg" class="form-grid">
+      ${S2I.sections.map((s) => `<div><label>${s} — ${esc(S2I.formations[s.split("-")[0]] || "")}, ${s.endsWith("1A") ? "1ère" : "2ème"} année</label><input name="d_${s}" type="email" value="${esc(l[s])}" placeholder="ex. S2I_${s.replace("-", "_")}_2627@um5.ac.ma"></div>`).join("")}
+      <div class="full checks"><label><input type="checkbox" name="on" ${Diffusion.enabled() ? "checked" : ""}> Prévenir les listes de diffusion à chaque publication (contenu, quiz, séance à distance)</label></div>
+      <div class="full toolbar"><button class="btn">Enregistrer</button></div></form></div>`;
+}
+function bindDiffusionSettings(el) {
+  const f = $("#difcfg", el); if (!f) return;
+  f.onsubmit = (e) => {
+    e.preventDefault(); const st = Store.settings();
+    st.diffusion = Object.fromEntries(S2I.sections.map((s) => [s, f["d_" + s].value.trim()])); st.diffusionOff = !f.on.checked;
+    Store.saveSettings(); UI.toast("Listes de diffusion enregistrées.");
+  };
+}

@@ -102,6 +102,11 @@ function visioAnnounce(v, ctx, kind) {
     module: v.module, section: sec, authorRole: "prof", authorId: ctx.user.id, authorName: UI.profName(ctx.profId), system: true, date: new Date().toISOString(),
     text: `${head} : ${v.titre} — ${Visio.when(v)}${(v.etudiants || []).length ? `\nRéservée à : ${Visio.publicLabel(v).replace(/^\d+ étudiant\(s\) : /, "")}` : ""}${kind !== "cancel" && v.lien ? `\nRejoindre : ${v.lien}` : ""}${kind !== "cancel" && v.tableau ? `\nTableau blanc : ${v.tableau}` : ""}${kind !== "cancel" && !v.lien ? "\nLe lien sera communiqué ici." : ""}`
   }));
+  if (!(v.etudiants || []).length) {
+    const what = { create: "Nouvelle séance à distance", update: "Séance à distance modifiée", cancel: "Séance à distance annulée" }[kind];
+    Diffusion.send({ sections: v.sections || [], subject: `${what} — ${v.module} : ${v.titre}`,
+      body: `Bonjour,\n\n${what} : « ${v.titre} »\nModule : ${UI.moduleLabel(v.module)}\nDate : ${Visio.when(v)}\nPlateforme : ${pf}\nEnseignant : ${UI.profName(ctx.profId)}${kind !== "cancel" && v.lien ? `\n\nRejoindre la séance : ${v.lien}` : ""}${kind !== "cancel" && v.tableau ? `\nTableau blanc : ${v.tableau}` : ""}${v.description && kind !== "cancel" ? `\n\n${v.description}` : ""}\n\nLa séance figure aussi dans votre Espace Étudiant (onglets « Séances à distance » et « Emploi du temps »).\n\nCordialement,\n${UI.profName(ctx.profId)}` });
+  }
 }
 
 /* ---------- Espace Professeur ---------- */

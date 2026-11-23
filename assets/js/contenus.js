@@ -165,7 +165,7 @@ function ContentsView(el, ctx) {
       <div class="up-status muted" id="up-${d.id}"></div></div>`; };
     el.innerHTML = `<div class="page-head"><h1><a href="#" id="c-back" class="back">←</a> ${esc(c.titre)}</h1><div class="toolbar">
         ${statutPill(c.statut)}
-        ${c.statut === "publie" ? `<button class="btn outline sm" data-st="brouillon">Dépublier</button>` : `<button class="btn sm" data-st="publie">Publier</button>`}
+        ${c.statut === "publie" ? `<button class="btn sm" id="c-notif" title="Message aux étudiants et e-mail aux listes de diffusion">📣 Prévenir les étudiants</button><button class="btn outline sm" data-st="brouillon">Dépublier</button>` : `<button class="btn sm" data-st="publie">Publier</button>`}
         <button class="btn outline sm" id="c-edit">Modifier</button><button class="btn danger sm" id="c-del">Supprimer</button></div></div>
       <p class="muted" style="margin-top:-6px">${esc(UI.moduleLabel(c.module))} · ${(c.sections || []).map((s) => `<span class="pill sec">${s}</span>`).join(" ")}${ctx.profId ? "" : ` · ${esc(UI.profName(c.profId))}`}</p>
       ${c.description ? `<p style="white-space:pre-wrap">${esc(c.description)}</p>` : ""}
@@ -178,6 +178,7 @@ function ContentsView(el, ctx) {
 
     $("#c-back", el).onclick = (e) => { e.preventDefault(); st.open = null; draw(); };
     $("#c-edit", el).onclick = () => form(c);
+    if ($("#c-notif", el)) $("#c-notif", el).onclick = () => { if (!UI.confirm("Prévenir les étudiants (messagerie et listes de diffusion) des documents de ce contenu" + (c.notifiedAt ? " ajoutés depuis le dernier envoi" : "") + " ?")) return; notify(c, true); UI.toast("Étudiants prévenus."); };
     $("#c-del", el).onclick = () => delContent(c);
     $$("[data-st]", el).forEach((b) => b.onclick = () => { setStatut(c, b.dataset.st); draw(); });
     $$("[data-newdir]", el).forEach((b) => b.onclick = () => dirForm(c, b.dataset.newdir));
@@ -231,11 +232,25 @@ function ContentsView(el, ctx) {
     setTimeout(() => { const i = document.querySelector('.modal input[name="nom"]'); if (i) i.focus(); }, 50);
   };
 
-  const notify = (c) => {
-    (c.sections || []).forEach((sec) => Store.put("messages", {
-      module: c.module, section: sec, authorRole: ctx.profId ? "prof" : "admin", authorId: ctx.user.id, authorName: ctx.profId ? UI.profName(ctx.profId) : "Administration",
-      text: `📢 Nouveau contenu publié : ${c.titre} (onglet « Contenus pédagogiques »)`, system: true, date: new Date().toISOString()
+  /* Résumé des documents pour l'e-mail : « Cours / Chapitre 1 : cours.pdf, … » */
+  const docsText = (c, since) => {
+    const lines = [];
+    Object.entries(RUBRIQUES).forEach(([k, v]) => (c.dossiers || []).filter((d) => d.rubrique === k).forEach((d) => {
+      const fs = Docs.ofFolder(c.id, d.id).filter((f) => !since || (f.createdAt || "") > since);
+      if (fs.length) lines.push(`• ${v} / ${d.nom} : ${fs.map((f) => f.nom).join(", ")}`);
     }));
+    return lines.join("\n");
+  };
+  const notify = (c, update) => {
+    const since = update ? c.notifiedAt : null; const list = docsText(c, since);
+    const author = ctx.profId ? UI.profName(ctx.profId) : "Administration";
+    (c.sections || []).forEach((sec) => Store.put("messages", {
+      module: c.module, section: sec, authorRole: ctx.profId ? "prof" : "admin", authorId: ctx.user.id, authorName: author,
+      text: update ? `📢 Nouveaux documents dans « ${c.titre} »${list ? "\n" + list : ""}` : `📢 Nouveau contenu publié : ${c.titre} (onglet « Contenus pédagogiques »)`, system: true, date: new Date().toISOString()
+    }));
+    Diffusion.send({ sections: c.sections, subject: `${update ? "Nouveaux documents" : "Nouveau contenu"} — ${c.module} : ${c.titre}`,
+      body: `Bonjour,\n\n${update ? `De nouveaux documents ont été ajoutés au contenu « ${c.titre} »` : `Un nouveau contenu pédagogique a été publié : « ${c.titre} »`}\nModule : ${UI.moduleLabel(c.module)}\nEnseignant : ${author}\n${c.description ? "\n" + c.description + "\n" : ""}${list ? "\nDocuments :\n" + list + "\n" : ""}\nConsultez-les dans votre Espace Étudiant, onglet « Contenus pédagogiques » : ${siteBase()}etudiant.html\n\nCordialement,\n${author}` });
+    c.notifiedAt = new Date().toISOString(); Store.put("contents", c);
   };
 
   const form = (c) => {

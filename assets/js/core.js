@@ -1,7 +1,7 @@
 /* ==========================================================================
    Noyau : stockage, authentification, utilitaires d'interface
    ========================================================================== */
-const COLS = ["profs", "students", "contents", "sessions", "messages", "timetable", "exams", "soutenances", "modules", "notifications", "visios", "rappels", "fichiers"];
+const COLS = ["profs", "students", "contents", "sessions", "messages", "timetable", "exams", "soutenances", "modules", "notifications", "visios", "rappels", "fichiers", "quiz", "quiz_reponses", "quiz_corriges"];
 const DB_KEY = "s2i_db_v1";
 
 /* ---------------- Utilitaires ---------------- */
@@ -169,7 +169,8 @@ const Store = {
     const conf = await this.fs.collection("config").doc("settings").get();
     this.data = { settings: conf.exists ? conf.data() : {} };
     if (r === "admin" || r === "prof") {
-      await Promise.all(COLS.map(async (c) => { this.data[c] = r === "prof" && c === "rappels" ? docs(await this.fs.collection(c).where("profId", "==", this.me.refId).get()) : await col(c); }));
+      await Promise.all(COLS.map(async (c) => { this.data[c] = r === "prof" && c === "rappels" ? docs(await this.fs.collection(c).where("profId", "==", this.me.refId).get()) : await col(c).catch((e) => { console.error(c, e); return []; }); }));
+      const ia = await this.fs.collection("config").doc("ia").get().catch(() => null); this.data.ia = ia && ia.exists ? ia.data() : {};
     } else if (r === "student") {
       await Promise.all(["modules", "profs", "timetable", "exams", "soutenances", "notifications", "visios"].map(async (c) => { this.data[c] = await col(c); }));
       const own = await this.fs.collection("students").doc(this.me.refId).get();
@@ -177,6 +178,10 @@ const Store = {
       this.data.sessions = docs(await this.fs.collection("sessions").where("section", "==", sec).get());
       this.data.contents = docs(await this.fs.collection("contents").where("statut", "==", "publie").get());
       this.data.fichiers = await this.fs.collection("fichiers").where("statut", "==", "publie").get().then(docs).catch(() => []);
+      const qz = (s) => this.fs.collection("quiz").where("statut", "==", s).get().then(docs).catch(() => []);
+      this.data.quiz = [...await qz("publie"), ...await qz("ferme")];
+      this.data.quiz_reponses = await this.fs.collection("quiz_reponses").where("studentId", "==", this.me.refId).get().then(docs).catch(() => []);
+      this.data.quiz_corriges = [];
       this.data.messages = docs(await this.fs.collection("messages").where("section", "in", [sec, "ALL"]).get());
     }
     this._ensure();
@@ -307,7 +312,7 @@ const Auth = {
    Chaque action (connexion, consultation, création, modification, suppression)
    est enregistrée dans la collection « logs » (lisible par l'administrateur seul). */
 const LOG_LABELS = { contents: "Contenu pédagogique", sessions: "Feuille de présence", messages: "Message", visios: "Séance Teams", timetable: "Créneau d'emploi du temps",
-  students: "Fiche étudiant", profs: "Fiche enseignant", modules: "Module", notifications: "Notification", exams: "Examen", soutenances: "Soutenance", rappels: "Rappel de saisie des absences", fichiers: "Document" };
+  students: "Fiche étudiant", profs: "Fiche enseignant", modules: "Module", notifications: "Notification", exams: "Examen", soutenances: "Soutenance", rappels: "Rappel de saisie des absences", fichiers: "Document", quiz: "Quiz", quiz_reponses: "Copie de quiz" };
 const Journal = {
   queue: [], timer: null, _lastView: "",
   who() {
@@ -328,6 +333,8 @@ const Journal = {
     const s = (x) => String(x || "").replace(/\s+/g, " ").trim();
     switch (col) {
       case "messages": return `${s(o.module) === "ALL" ? "Annonces" : s(o.module)} · ${s(o.section)} : ${s(o.text).slice(0, 90)}`;
+      case "quiz": return `${s(o.module)} « ${s(o.titre)} » · ${(o.sections || []).join(", ")} · ${(o.questions || []).length} question(s)${o.statut ? ` (${({ publie: "publié", brouillon: "brouillon", ferme: "fermé" })[o.statut] || o.statut})` : ""}`;
+      case "quiz_reponses": { const q = Store.get("quiz", o.quizId); return `${s(o.module)} « ${q ? s(q.titre) : s(o.quizId)} » — tentative ${o.tentative || 1}`; }
       case "fichiers": { const c = Store.get("contents", o.contentId); const d = c && (c.dossiers || []).find((x) => x.id === o.dossierId);
         return `${s(o.module)} · ${(typeof RUBRIQUES !== "undefined" && RUBRIQUES[o.rubrique]) || ""}${d ? " / " + s(d.nom) : ""} « ${s(o.nom)} »${c ? ` (contenu « ${s(c.titre)} »)` : ""}`; }
       case "contents": return `${s(o.module)} · ${S2I.typesContenu[o.type] ? S2I.typesContenu[o.type] + " " : ""}« ${s(o.titre)} »${o.statut ? ` (${({ publie: "publié", brouillon: "non publié", desactive: "désactivé" })[o.statut] || o.statut})` : ""}`;

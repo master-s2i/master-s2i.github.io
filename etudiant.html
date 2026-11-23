@@ -19,6 +19,7 @@
 <script src="assets/js/core.js"></script>
 <script src="assets/js/components.js"></script>
 <script src="assets/js/contenus.js"></script>
+<script src="assets/js/quiz.js"></script>
 <script src="assets/js/notifications.js"></script>
 <script src="assets/js/visio.js"></script>
 <script>
@@ -57,6 +58,7 @@
     }},
     { id: "notifications", label: "Notifications", badge: () => Notif.unread(user), render: (el) => StudentNotificationsView(el, user, () => refreshBadges(views)) },
     { id: "contenus", label: "Contenus pédagogiques", render: (el) => StudentContentsView(el, { contents: published, modules: myMods }) },
+    { id: "quiz", label: "Quiz", badge: () => QuizSvc.all().filter((q) => QuizSvc.isOpen(q) && (q.sections || []).includes(sec) && myMods.includes(q.module) && !Store.all("quiz_reponses").some((r) => r.quizId === q.id && r.studentId === user.id)).length, render: (el) => StudentQuizView(el, { user, sec, modules: myMods }) },
     { id: "absences", label: "Mes absences", render: (el) => {
       const ss = mySessions().sort((a, b) => (b.date + b.debut).localeCompare(a.date + a.debut));
       const rows = myMods.map((m) => { const x = ss.filter((s) => s.module === m); const c = { A: 0, R: 0, J: 0 }; x.forEach((s) => { const v = s.records[user.id]; if (c[v] !== undefined) c[v]++; }); return { m, n: x.length, ...c }; }).filter((r) => r.n);

@@ -34,8 +34,9 @@ service cloud.firestore {
     }
 
     // Paramètres généraux (année, sections, modèles d'e-mails…)
+    // config/ia (clé du service d'IA) : enseignants et administration seulement
     match /config/{doc} {
-      allow read:  if signedIn();
+      allow read:  if (signedIn() && doc != "ia") || isStaff();
       allow write: if isAdmin();
     }
 
@@ -109,6 +110,44 @@ service cloud.firestore {
       allow get:    if signedIn();
       allow list:   if isStaff();
       allow create: if isStaff() && request.resource.data.data is string && request.resource.data.data.size() <= 950000;
+      allow update: if false;
+      allow delete: if isStaff();
+    }
+
+    // Quiz : l'étudiant lit les quiz publiés ou fermés (sans les bonnes réponses, rangées dans quiz_corriges)
+    function quizOf(qid) { return get(/databases/$(database)/documents/quiz/$(qid)).data; }
+    match /quiz/{id} {
+      allow read: if isStaff() || (isStudent() && resource.data.statut in ["publie", "ferme"]);
+      allow create, update: if isAdmin()
+                  || (isProf() && request.resource.data.profId == me().refId && request.resource.data.module in profModules());
+      allow delete: if isAdmin() || (isProf() && resource.data.profId == me().refId);
+    }
+
+    // Bonnes réponses et explications : visibles par l'étudiant seulement après la fermeture du quiz,
+    // ou (correction immédiate) une fois sa dernière tentative rendue.
+    match /quiz_corriges/{qid} {
+      allow read: if isStaff()
+                  || (isStudent() && (quizOf(qid).statut == "ferme"
+                      || (quizOf(qid).fermetureMs > 0 && request.time.toMillis() > quizOf(qid).fermetureMs)
+                      || (quizOf(qid).corrige == "immediat" && quizOf(qid).tentatives == 0
+                          && exists(/databases/$(database)/documents/quiz_reponses/$(qid + "_" + me().refId + "_1")))
+                      || (quizOf(qid).corrige == "immediat" && quizOf(qid).tentatives > 0
+                          && exists(/databases/$(database)/documents/quiz_reponses/$(qid + "_" + me().refId + "_" + string(quizOf(qid).tentatives))))));
+      allow create, update: if isAdmin()
+                  || (isProf() && request.resource.data.profId == me().refId && request.resource.data.module in profModules());
+      allow delete: if isAdmin() || (isProf() && resource.data.profId == me().refId);
+    }
+
+    // Copies des étudiants : une copie par tentative (identifiant quiz_étudiant_n), non modifiable,
+    // déposée uniquement pendant l'ouverture du quiz et dans la limite des tentatives.
+    match /quiz_reponses/{id} {
+      allow read: if isStaff() || (isStudent() && resource.data.studentId == me().refId);
+      allow create: if isStudent() && request.resource.data.studentId == me().refId
+                    && id == request.resource.data.quizId + "_" + me().refId + "_" + string(request.resource.data.tentative)
+                    && quizOf(request.resource.data.quizId).statut == "publie"
+                    && me().section in quizOf(request.resource.data.quizId).sections
+                    && (quizOf(request.resource.data.quizId).tentatives == 0 || request.resource.data.tentative <= quizOf(request.resource.data.quizId).tentatives)
+                    && (quizOf(request.resource.data.quizId).fermetureMs == 0 || request.time.toMillis() <= quizOf(request.resource.data.quizId).fermetureMs + 180000);
       allow update: if false;
       allow delete: if isStaff();
     }

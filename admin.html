@@ -19,6 +19,7 @@
 <script src="assets/js/core.js"></script>
 <script src="assets/js/components.js"></script>
 <script src="assets/js/contenus.js"></script>
+<script src="assets/js/quiz.js"></script>
 <script src="assets/js/excel.js"></script>
 <script src="assets/js/admin-students.js"></script>
 <script src="assets/js/notifications.js"></script>
@@ -119,6 +120,7 @@
     { id: "suivi", label: "Suivi de la saisie des absences", badge: () => Suivi.slots(shiftISO(todayISO(), -14)).filter((x) => !x.ok).length, render: (el) => SuiviAbsencesAdmin(el) },
     { id: "absences", label: "Absences", render: (el) => AttendanceView(el, { modules: allMods().filter((c) => c !== "PFE"), profId: null }) },
     { id: "contenus", label: "Contenus pédagogiques", render: (el) => ContentsView(el, { modules: allMods(), profId: null, user }) },
+    { id: "quiz", label: "Quiz", render: (el) => QuizView(el, { modules: allMods(), profId: null, user }) },
     { id: "notifications", label: "Notifications (Planning)", render: (el) => NotificationsAdmin(el) },
     { id: "messagerie", label: "Messagerie", badge: () => Chat.totalUnread(ctxUser, channels()), render: (el) => ChatView(el, { user: ctxUser, role: "admin", channels: channels(), onRead: () => refreshBadges(views) }) },
     { id: "edt", label: "Emploi du temps", render: (el) => {
@@ -129,7 +131,7 @@
       const drawCrud = () => renderCrud(el.querySelector("#tt-crud"), {
         col: "timetable", title: ttState.all ? "Tous les créneaux" : `Créneaux — ${weekLabel(TTWeek.monday)}`,
         filter: (t) => ttState.all || slotInWeek(t, TTWeek.monday) || (!t.semaine && (t.exceptions || []).includes(TTWeek.monday)),
-        extraButtons: `<button class="btn outline" data-ttall>${ttState.all ? "Semaine affichée seulement" : "Voir tous les créneaux"}</button><button class="btn outline" data-ttdup>Dupliquer la semaine</button><button class="btn outline" data-ttimp>Importer Excel</button><button class="btn outline" data-ttexp>Exporter Excel</button>`,
+        extraButtons: `<button class="btn" data-ttann>📣 Annoncer l'emploi du temps</button><button class="btn outline" data-ttall>${ttState.all ? "Semaine affichée seulement" : "Voir tous les créneaux"}</button><button class="btn outline" data-ttdup>Dupliquer la semaine</button><button class="btn outline" data-ttimp>Importer Excel</button><button class="btn outline" data-ttexp>Exporter Excel</button>`,
         sort: sortTT,
         columns: [["Section", (r) => `<span class="pill sec">${r.section}</span>`], ["Semaine", (r) => r.semaine ? `${fmtDate(r.semaine)}` : (r.exceptions || []).includes(TTWeek.monday) ? '<span class="pill off">Annulée cette semaine</span>' : '<span class="muted">Récurrent</span>'],
           ["Jour", (r) => S2I.jours[r.jour - 1]], ["Horaire", (r) => `${r.debut} – ${r.fin}`], ["Module", (r) => esc(r.module)], ["Mode", (r) => modePill(r.mode, r.lien)], ["Salle", (r) => esc(r.salle || "—")], ["Enseignant", (r) => esc(UI.teacherOf(r) || "—")]],
@@ -162,6 +164,7 @@
                 if (!orig.semaine) { orig.exceptions = [...new Set([...(orig.exceptions || []), f.to.value])]; Store.put("timetable", orig); }
                 Store.put("timetable", { ...t, semaine: f.to.value }); });
               UI.toast(`${src.length} séance(s) copiée(s) vers la ${weekLabel(f.to.value).toLowerCase()}.`); drawCrud(); } });
+          box.querySelector("[data-ttann]").onclick = () => announceTimetable(TTWeek.monday);
           box.querySelector("[data-ttexp]").onclick = () => {
             const rows = Store.all("timetable").filter((t) => ttState.all || slotInWeek(t, TTWeek.monday)).sort(sortTT);
             Excel.download(`emploi_du_temps_S2I_${ttState.all ? "complet" : TTWeek.monday}.xlsx`, [{ name: "EDT", widths: [10, 12, 12, 8, 8, 10, 40, 12, 16, 22, 30],
@@ -196,8 +199,8 @@
           <button class="btn" id="exp">Exporter les données</button><br><br><label>Restaurer depuis un fichier</label><input type="file" id="imp" accept=".json"></div>
         ${Store.mode === "firebase" ? `<div class="card"><h3>Base de données</h3><p class="muted">Mode <b>Firebase</b> (projet ${esc(window.FIREBASE_CONFIG.projectId)}) : les données sont partagées entre tous les utilisateurs.</p></div>` : `<div class="card"><h3>Page de connexion</h3><label class="checks" style="margin-bottom:14px"><input type="checkbox" id="demoh" ${Store.settings().demoHidden ? "checked" : ""}> Masquer les comptes de démonstration</label>
           <h3>Réinitialisation</h3><p class="muted">Remet le jeu de démonstration et efface toutes les données.</p><button class="btn danger" id="rst">Réinitialiser</button></div>`}
-        ${MailSettingsCards()}</div>`;
-      bindMailSettings(el);
+        ${MailSettingsCards()}${DiffusionSettingsCard()}${IASettingsCard()}</div>`;
+      bindMailSettings(el); bindDiffusionSettings(el); bindIASettings(el);
       const lk = el.querySelector("#apwlink"); if (lk) lk.onclick = async () => { try { await Auth.resetPassword(Store.me.email); UI.toast("Lien envoyé à " + Store.me.email + "."); } catch (e) { UI.toast("Échec : " + e.message); } };
       if (el.querySelector("#apw")) el.querySelector("#apw").onsubmit = async (e) => { e.preventDefault(); const f = e.target; if (f.p1.value !== f.p2.value) return UI.toast("Les deux mots de passe diffèrent.");
         Store.settings().adminHash = await hashPwd(f.p1.value); Store.saveSettings(); f.reset(); UI.toast("Mot de passe administrateur modifié."); };
@@ -211,6 +214,31 @@
   ];
   mountApp(user, "Administrateur · accès complet", views);
 })();
+
+/* Annonce de l'emploi du temps d'une semaine : notification (Planning) + e-mail aux listes de diffusion */
+function announceTimetable(mon) {
+  const slotsOf = (sec) => Store.all("timetable").filter((t) => t.section === sec && slotInWeek(t, mon)).sort((a, b) => a.jour - b.jour || a.debut.localeCompare(b.debut));
+  const txt = (sec) => slotsOf(sec).map((t) => `• ${S2I.jours[t.jour - 1]} ${fmtDate(shiftISO(mon, t.jour - 1))}, ${t.debut}–${t.fin} : ${t.module} – ${(Store.get("modules", t.module) || {}).titre || ""}${t.mode === "distance" ? " (à distance" + (t.lien ? " : " + t.lien : "") + ")" : t.salle ? " (" + t.salle + ")" : ""}${UI.teacherOf(t) ? " — " + UI.teacherOf(t) : ""}`).join("\n");
+  const secs = S2I.sections.filter((s) => slotsOf(s).length);
+  if (!secs.length) return UI.toast("Aucune séance dans l'emploi du temps de cette semaine.");
+  const l = Diffusion.lists();
+  UI.modal({
+    title: "Annoncer l'emploi du temps — " + weekLabel(mon), submitLabel: "Annoncer", wide: true,
+    body: `<div class="form-grid"><div class="full"><label>Sections</label><div class="checks">${S2I.sections.map((s) => `<label><input type="checkbox" name="sec" value="${s}" ${secs.includes(s) ? "checked" : "disabled"}> ${s} <span class="muted">(${slotsOf(s).length} séance(s)${l[s] ? " · " + esc(l[s]) : " · pas de liste"})</span></label>`).join("")}</div></div>
+      <div class="full"><label>Message (ajouté avant le détail des séances)</label><textarea name="msg">Bonjour,\n\nL'emploi du temps de la ${weekLabel(mon).toLowerCase()} est disponible sur la plateforme (onglet « Emploi du temps »).</textarea></div>
+      <div class="full checks"><label><input type="checkbox" name="notif" checked> Publier une notification « Planning » dans l'Espace Étudiant</label><label><input type="checkbox" name="mail" checked> Envoyer un e-mail aux listes de diffusion</label></div></div>
+      <p class="muted">Chaque section reçoit le détail de ses séances de la semaine.</p>`,
+    onSubmit: async (f) => {
+      const chosen = $$('input[name="sec"]:checked', f).map((i) => i.value); if (!chosen.length) { UI.toast("Choisissez au moins une section."); return false; }
+      for (const s of chosen) {
+        const [fo, an] = s.split("-"); const detail = txt(s); const titre = `Emploi du temps ${s} — ${weekLabel(mon)}`;
+        if (f.notif.checked) Store.put("notifications", { titre, categorie: "Planning", message: `${f.msg.value.trim()}\n\n${detail}`, lien: "", formation: fo, promotions: [], annee: an.replace("A", ""), publishAt: new Date().toISOString(), createdAt: new Date().toISOString() });
+        if (f.mail.checked) await Diffusion.send({ sections: [s], subject: titre, body: `${f.msg.value.trim()}\n\n${s} — ${weekLabel(mon)} :\n${detail}\n\nCordialement,\nLa coordination du Master S2I` });
+      }
+      UI.toast("Emploi du temps annoncé.");
+    }
+  });
+}
 </script>
 </body>
 </html>
