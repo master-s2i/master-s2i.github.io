@@ -94,6 +94,25 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isProf() && resource.data.profId == me().refId);
     }
 
+    // Documents des contenus (fiche) : rubrique Cours / TP / TD / Mise à niveau, sous-dossier, nom, taille…
+    // Le statut du contenu est recopié sur chaque document : l'étudiant ne lit que les documents publiés.
+    match /fichiers/{id} {
+      allow read: if isStaff() || (isStudent() && resource.data.statut == "publie");
+      allow create, update: if isAdmin()
+                  || (isProf() && request.resource.data.profId == me().refId && request.resource.data.module in profModules());
+      allow delete: if isAdmin() || (isProf() && resource.data.profId == me().refId);
+    }
+
+    // Contenu des documents, découpé en morceaux de moins de 1 Mo (identifiants aléatoires « <idFichier>_<n> »).
+    // Lecture d'un morceau par son identifiant uniquement (pas de liste pour les étudiants).
+    match /fichiers_data/{id} {
+      allow get:    if signedIn();
+      allow list:   if isStaff();
+      allow create: if isStaff() && request.resource.data.data is string && request.resource.data.data.size() <= 950000;
+      allow update: if false;
+      allow delete: if isStaff();
+    }
+
     // Séances à distance (Microsoft Teams) : lisibles par tous les comptes connectés (le site filtre par section) ;
     // le prof ne gère que ses séances, dans ses modules.
     match /visios/{id} {

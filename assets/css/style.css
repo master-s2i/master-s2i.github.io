@@ -334,3 +334,29 @@ tr.prefilled td { background: #fff7d6; transition: background .6s; }
 .v-stud-list { max-height: 220px; overflow-y: auto; display: grid; gap: 4px; font-size: 13.5px; }
 .v-stud-list label { font-weight: 400; display: flex; gap: 6px; align-items: center; margin: 0; color: var(--text); }
 .v-stud-list input { width: auto; }
+
+/* Contenus pédagogiques : rubriques, sous-dossiers et documents */
+.page-head h1 .back { text-decoration: none; margin-right: 6px; }
+.rubrique .panel-h .btn.light { margin-left: auto; background: #fff; color: var(--navy); border-color: #fff; }
+.folder { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; background: #fbfcfd; transition: background .15s, border-color .15s; }
+.folder.drag { background: #eef5ff; border-color: #4f6bed; border-style: dashed; }
+.folder-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.folder-a { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.folder-a label.btn { cursor: pointer; margin: 0; }
+.folder table.files { margin-top: 8px; background: #fff; }
+.folder table.files td { padding: 7px 10px; }
+.drop-hint { margin-top: 8px; padding: 14px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 13px; text-align: center; background: #fff; }
+.up-status:empty { display: none; }
+.up-status { margin-top: 6px; font-size: 13px; }
+.pill.rub-cours { background: #e8eefb; color: #1f4fa8; }
+.pill.rub-tp { background: #e3f4ea; color: #1d7a45; }
+.pill.rub-td { background: #fff3dc; color: #8a5a00; }
+.pill.rub-man { background: #f1e8fb; color: #6b2fa8; }
+.s-content { padding: 10px 0 14px; border-bottom: 1px solid var(--line); }
+.s-content:last-child { border-bottom: 0; }
+.s-rub { margin: 8px 0 4px; }
+.s-rub-h { font-weight: 600; margin-bottom: 4px; }
+.s-dir { margin: 2px 0 6px 14px; }
+.s-dir summary { cursor: pointer; }
+.s-files { list-style: none; padding-left: 22px; margin: 6px 0; }
+.s-files li { padding: 3px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

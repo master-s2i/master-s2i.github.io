@@ -1,7 +1,7 @@
 /* ==========================================================================
    Noyau : stockage, authentification, utilitaires d'interface
    ========================================================================== */
-const COLS = ["profs", "students", "contents", "sessions", "messages", "timetable", "exams", "soutenances", "modules", "notifications", "visios", "rappels"];
+const COLS = ["profs", "students", "contents", "sessions", "messages", "timetable", "exams", "soutenances", "modules", "notifications", "visios", "rappels", "fichiers"];
 const DB_KEY = "s2i_db_v1";
 
 /* ---------------- Utilitaires ---------------- */
@@ -176,6 +176,7 @@ const Store = {
       this.data.students = own.exists ? [own.data()] : [];
       this.data.sessions = docs(await this.fs.collection("sessions").where("section", "==", sec).get());
       this.data.contents = docs(await this.fs.collection("contents").where("statut", "==", "publie").get());
+      this.data.fichiers = await this.fs.collection("fichiers").where("statut", "==", "publie").get().then(docs).catch(() => []);
       this.data.messages = docs(await this.fs.collection("messages").where("section", "in", [sec, "ALL"]).get());
     }
     this._ensure();
@@ -228,8 +229,9 @@ async function buildSeed() {
     { id: uid(), date: addDays(40), heure: "10:00", etudiant: "Imane Fassi (TN-2A)", sujet: "Détection de défauts par vision embarquée", encadrant: "Pr. A. Berrahou", jury: "À définir", salle: "Salle des soutenances" }
   ];
   d.contents = [
-    { id: uid(), module: "M2.1", type: "cours", titre: "Chapitre 1 : Architecture des microcontrôleurs", description: "Support de cours (diapositives).", lien: "", fichier: null, sections: ["TN-1A", "TAM-1A"], statut: "publie", dateLimite: "", profId: "p1", createdAt: new Date().toISOString() },
-    { id: uid(), module: "M2.1", type: "tp", titre: "TP1 : GPIO et interruptions", description: "Énoncé du TP1, à rendre en fin de séance.", lien: "", fichier: null, sections: ["TN-1A"], statut: "brouillon", dateLimite: "", profId: "p1", createdAt: new Date().toISOString() }
+    { id: uid(), module: "M2.1", titre: "Programmation des systèmes embarqués — supports", description: "Supports du module, organisés par rubrique.", lien: "", sections: ["TN-1A", "TAM-1A"], statut: "publie", profId: "p1",
+      dossiers: [{ id: uid(), rubrique: "cours", nom: "Chapitre 1 — Architecture des microcontrôleurs" }, { id: uid(), rubrique: "tp", nom: "TP1 — GPIO et interruptions" }, { id: uid(), rubrique: "man", nom: "Rappels de langage C" }],
+      createdAt: new Date().toISOString() }
   ];
   d.messages = [
     { id: uid(), module: "ALL", section: "ALL", authorRole: "admin", authorId: "admin", authorName: "Coordination S2I", text: "Bienvenue sur la plateforme du Master S2I, année " + S2I.annee + ".", system: false, date: new Date().toISOString() }
@@ -305,7 +307,7 @@ const Auth = {
    Chaque action (connexion, consultation, création, modification, suppression)
    est enregistrée dans la collection « logs » (lisible par l'administrateur seul). */
 const LOG_LABELS = { contents: "Contenu pédagogique", sessions: "Feuille de présence", messages: "Message", visios: "Séance Teams", timetable: "Créneau d'emploi du temps",
-  students: "Fiche étudiant", profs: "Fiche enseignant", modules: "Module", notifications: "Notification", exams: "Examen", soutenances: "Soutenance", rappels: "Rappel de saisie des absences" };
+  students: "Fiche étudiant", profs: "Fiche enseignant", modules: "Module", notifications: "Notification", exams: "Examen", soutenances: "Soutenance", rappels: "Rappel de saisie des absences", fichiers: "Document" };
 const Journal = {
   queue: [], timer: null, _lastView: "",
   who() {
@@ -326,7 +328,9 @@ const Journal = {
     const s = (x) => String(x || "").replace(/\s+/g, " ").trim();
     switch (col) {
       case "messages": return `${s(o.module) === "ALL" ? "Annonces" : s(o.module)} · ${s(o.section)} : ${s(o.text).slice(0, 90)}`;
-      case "contents": return `${s(o.module)} · ${S2I.typesContenu[o.type] || ""} « ${s(o.titre)} »${o.statut ? ` (${({ publie: "publié", brouillon: "non publié", desactive: "désactivé" })[o.statut] || o.statut})` : ""}`;
+      case "fichiers": { const c = Store.get("contents", o.contentId); const d = c && (c.dossiers || []).find((x) => x.id === o.dossierId);
+        return `${s(o.module)} · ${(typeof RUBRIQUES !== "undefined" && RUBRIQUES[o.rubrique]) || ""}${d ? " / " + s(d.nom) : ""} « ${s(o.nom)} »${c ? ` (contenu « ${s(c.titre)} »)` : ""}`; }
+      case "contents": return `${s(o.module)} · ${S2I.typesContenu[o.type] ? S2I.typesContenu[o.type] + " " : ""}« ${s(o.titre)} »${o.statut ? ` (${({ publie: "publié", brouillon: "non publié", desactive: "désactivé" })[o.statut] || o.statut})` : ""}`;
       case "sessions": { const r = Object.values(o.records || {}); return `${s(o.module)} · ${s(o.section)} · ${fmtDate(o.date)} ${s(o.debut)}${r.length ? ` — ${r.filter((x) => x === "A").length} absent(s) / ${r.length}` : ""}`; }
       case "visios": return `${s(o.module)} · ${(o.sections || []).join(", ")}${(o.etudiants || []).length ? ` (${o.etudiants.length} étudiant(s) choisi(s))` : ""} · ${fmtDate(o.date)} ${s(o.debut)} « ${s(o.titre)} »${o.statut === "annulee" ? " (annulée)" : ""}`;
       case "timetable": return `${s(o.section)} · ${S2I.jours[(o.jour || 1) - 1] || ""} ${s(o.debut)}–${s(o.fin)} · ${s(o.module)}`;

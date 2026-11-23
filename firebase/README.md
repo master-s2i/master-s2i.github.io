@@ -25,7 +25,9 @@ Chaque collection Firestore correspond à une fonction du site. L'identifiant du
 | `students` | Étudiants | `login` (code CNE/Massar), `nom`, `prenom`, `email`, `formation`, `promotion`, `annee`, `inactif`, `uid`, `credsSentAt` |
 | `timetable` | Créneaux de l'emploi du temps | `section`, `jour` (1 = lundi … 6 = samedi), `debut`, `fin`, `module`, `salle`, `profId` / `profNom`, `mode` (`presentiel`, `distance`), `lien`, `semaine` (vide = récurrent, sinon le lundi `AAAA-MM-JJ`), `exceptions[]` (semaines annulées) |
 | `sessions` | Feuilles de présence | `module`, `section`, `date`, `debut`, `fin`, `type`, `nature`, `mode`, `profId`, `records` {idÉtudiant: `P`, `A`, `R` ou `J`}, `comments` |
-| `contents` | Cours, TD, TP et devoirs | `module`, `type`, `titre`, `description`, `lien`, `sections[]`, `statut` (`publie`, `brouillon`, `desactive`), `dateLimite`, `profId` |
+| `contents` | Contenus pédagogiques, organisés en rubriques (Cours, TP, TD, Mise à niveau) et sous-dossiers | `module`, `titre`, `description`, `lien`, `dossiers[]` ({`id`, `rubrique`, `nom`}), `sections[]`, `statut` (`publie`, `brouillon`, `desactive`), `dateLimite`, `profId` |
+| `fichiers` | Documents des contenus (fiches) | `contentId`, `dossierId`, `rubrique` (`cours`, `tp`, `td`, `man`), `module`, `profId`, `statut` (recopié du contenu), `nom`, `taille`, `mime`, `parts`, `createdAt` |
+| `fichiers_data` | Contenu des documents, en morceaux base64 de moins de 1 Mo | `fileId`, `i`, `contentId`, `data` (identifiant du document : `<idFichier>_<n>`) |
 | `messages` | Messagerie par module et section | `module` (`ALL` = annonces), `section`, `authorRole`, `authorId`, `authorUid`, `authorName`, `text`, `date` |
 | `notifications` | Notifications ciblées (Planning) | `titre`, `categorie`, `message`, `lien`, `formation`, `promotions[]`, `annee`, `publishAt` |
 | `exams` | Calendrier des examens | `section`, `module`, `type`, `date`, `debut`, `fin`, `salle` |
