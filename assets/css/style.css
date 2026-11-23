@@ -400,3 +400,5 @@ b.ok { color: var(--ok); } b.ko { color: var(--danger); }
 .qz-stat { display: grid; grid-template-columns: 1fr 180px 50px; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .qz-bar { height: 10px; background: #eef0f3; border-radius: 5px; overflow: hidden; }
 .qz-bar i { display: block; height: 100%; }
+
+.folder table.files tr.unpub td:first-child { opacity: .7; }

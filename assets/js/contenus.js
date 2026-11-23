@@ -64,7 +64,7 @@ const Docs = {
       }
     } catch (e) { for (let i = 0; i < n; i++) this._delPart(`${id}_${i}`).catch(() => {}); throw e; }
     const meta = { id, contentId: content.id, dossierId: dossier.id, rubrique: dossier.rubrique, module: content.module, profId: content.profId || "",
-      statut: content.statut, nom: file.name, taille: file.size, mime: file.type || "", parts: n, createdAt: new Date().toISOString() };
+      statut: "brouillon", nom: file.name, taille: file.size, mime: file.type || "", parts: n, createdAt: new Date().toISOString() };
     await Store.putAwait("fichiers", meta);
     return meta;
   },
@@ -94,14 +94,21 @@ const Docs = {
   },
   async removeAll(list) { for (const f of list) await this.remove(f); },
   /* Le statut du contenu est recopié sur ses documents (règles de lecture des étudiants) */
-  syncStatut(c) { this.ofContent(c.id).forEach((f) => { if (f.statut !== c.statut || f.module !== c.module) Store.put("fichiers", { ...f, statut: c.statut, module: c.module }); }); }
+  /* Chaque document se publie séparément ; seul le module du contenu est recopié sur ses documents */
+  syncStatut(c) { this.ofContent(c.id).forEach((f) => { if (f.module !== c.module) Store.put("fichiers", { ...f, module: c.module }); }); },
+  published: (f) => f.statut === "publie",
+  /* Publie ou retire un document ; la fiche du contenu devient visible dès son premier document publié */
+  setPublished(f, on, c) {
+    Store.put("fichiers", { ...f, statut: on ? "publie" : "brouillon", publieAt: on ? new Date().toISOString() : "" });
+    if (on && c && c.statut === "brouillon") { c.statut = "publie"; c.updatedAt = new Date().toISOString(); Store.put("contents", c); }
+  }
 };
 
 /* Résumé « Cours 3 · TP 1 » d'un contenu */
 function docsSummary(c) {
-  const fs = Docs.ofContent(c.id);
+  const fs = Docs.ofContent(c.id); const pub = fs.filter(Docs.published).length;
   const parts = Object.entries(RUBRIQUES).map(([k, v]) => { const n = fs.filter((f) => f.rubrique === k).length; const d = (c.dossiers || []).filter((x) => x.rubrique === k).length; return d || n ? `<span class="pill rub-${k}" title="${d} sous-dossier(s)">${v} · ${n}</span>` : ""; }).filter(Boolean);
-  return parts.length ? parts.join(" ") : '<span class="muted">Aucun document</span>';
+  return parts.length ? `${parts.join(" ")}<div class="muted" style="font-size:12.5px;margin-top:3px">${pub} / ${fs.length} publié(s)</div>` : '<span class="muted">Aucun document</span>';
 }
 
 /* ---------- Espace enseignant / administrateur ----------
@@ -115,8 +122,7 @@ function ContentsView(el, ctx) {
 
   const setStatut = (c, s) => {
     const was = c.statut; c.statut = s; c.updatedAt = new Date().toISOString(); Store.put("contents", c); Docs.syncStatut(c);
-    if (s === "publie" && was !== "publie") notify(c);
-    UI.toast({ publie: "Contenu publié et étudiants notifiés.", brouillon: "Contenu retiré (non publié).", desactive: "Contenu désactivé." }[s]);
+    UI.toast({ publie: "Contenu de nouveau visible.", brouillon: "Contenu de nouveau visible (aucun document publié).", desactive: "Contenu masqué aux étudiants." }[s]);
   };
   const delContent = async (c) => {
     const n = Docs.ofContent(c.id).length;
@@ -139,11 +145,10 @@ function ContentsView(el, ctx) {
         <td>${docsSummary(c)}</td>
         <td>${(c.sections || []).map((s) => `<span class="pill sec">${s}</span>`).join(" ")}</td><td>${statutPill(c.statut)}</td>
         <td class="actions"><button class="btn sm" data-open="${c.id}">📂 Dossiers</button>
-          ${c.statut === "publie" ? `<button class="btn outline sm" data-st="brouillon" data-id="${c.id}">Dépublier</button>` : `<button class="btn outline sm" data-st="publie" data-id="${c.id}">Publier</button>`}
-          ${c.statut !== "desactive" ? `<button class="btn outline sm" data-st="desactive" data-id="${c.id}">Désactiver</button>` : ""}
+          ${c.statut === "desactive" ? `<button class="btn outline sm" data-st="${Docs.ofContent(c.id).some(Docs.published) ? "publie" : "brouillon"}" data-id="${c.id}">Réafficher</button>` : `<button class="btn outline sm" data-st="desactive" data-id="${c.id}" title="Masque tout le contenu aux étudiants, sans changer le statut de ses documents">Masquer</button>`}
           <button class="btn outline sm" data-edit="${c.id}">Modifier</button> <button class="btn danger sm" data-del="${c.id}">Supprimer</button></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="alert info">Aucun contenu. Cliquez sur « Nouveau contenu », puis ajoutez vos documents dans les rubriques Cours, TP, TD et Mise à niveau.</div>`}
-      <p class="muted">Chaque contenu est organisé en 4 rubriques (Cours, TP, TD, Mise à niveau), découpées en sous-dossiers qui reçoivent les documents. Seuls les contenus <b>publiés</b> sont visibles par les étudiants des sections choisies.</p>`;
+      <p class="muted">Chaque contenu est organisé en 4 rubriques (Cours, TP, TD, Mise à niveau), découpées en sous-dossiers qui reçoivent les documents. <b>Chaque document se publie séparément</b> : un document ajouté reste invisible pour les étudiants tant que vous ne l'avez pas publié. « Masquer » cache tout le contenu.</p>`;
     $("#c-mod", el).onchange = (e) => { st.module = e.target.value; draw(); };
     $("#c-add", el).onclick = () => form(null);
     $$("[data-open]", el).forEach((b) => b.onclick = (e) => { e.preventDefault(); st.open = b.dataset.open; draw(); window.scrollTo(0, 0); });
@@ -155,22 +160,29 @@ function ContentsView(el, ctx) {
   /* Rubriques, sous-dossiers et documents d'un contenu */
   const drawDetail = (c) => {
     const dossiers = c.dossiers || [];
-    const fileRow = (f) => `<tr><td>${Docs.icon(f.nom)} <a href="#" data-view="${f.id}">${esc(f.nom)}</a></td><td class="muted">${Docs.size(f.taille)}</td><td class="muted">${fmtDate((f.createdAt || "").slice(0, 10))}</td>
-      <td class="actions"><button type="button" class="btn outline sm" data-dl="${f.id}">Télécharger</button> <button type="button" class="btn danger sm" data-fdel="${f.id}">Supprimer</button></td></tr>`;
+    const fileRow = (f) => `<tr class="${Docs.published(f) ? "" : "unpub"}"><td>${Docs.icon(f.nom)} <a href="#" data-view="${f.id}">${esc(f.nom)}</a></td><td class="muted">${Docs.size(f.taille)}</td><td class="muted">${fmtDate((f.createdAt || "").slice(0, 10))}</td>
+      <td>${Docs.published(f) ? '<span class="pill pub">Publié</span>' : '<span class="pill draft">Non publié</span>'}</td>
+      <td class="actions">${Docs.published(f) ? `<button type="button" class="btn outline sm" data-pub="${f.id}" data-on="0">Dépublier</button>` : `<button type="button" class="btn sm" data-pub="${f.id}" data-on="1">Publier</button>`}
+        <button type="button" class="btn outline sm" data-dl="${f.id}">Télécharger</button> <button type="button" class="btn danger sm" data-fdel="${f.id}">Supprimer</button></td></tr>`;
     const folder = (d) => { const fs = Docs.ofFolder(c.id, d.id); return `<div class="folder" data-folder="${d.id}">
-      <div class="folder-h"><b>📁 ${esc(d.nom)}</b> <span class="muted">${fs.length} document(s)</span>
-        <span class="folder-a"><label class="btn sm">⬆ Ajouter des documents<input type="file" multiple hidden accept="${Docs.ACCEPT}" data-up="${d.id}"></label>
+      <div class="folder-h"><b>📁 ${esc(d.nom)}</b> <span class="muted">${fs.length} document(s)${fs.length ? ` · ${fs.filter(Docs.published).length} publié(s)` : ""}</span>
+        <span class="folder-a">${fs.some((f) => !Docs.published(f)) ? `<button type="button" class="btn outline sm" data-pubdir="${d.id}">Publier tout le dossier</button>` : ""}<label class="btn sm">⬆ Ajouter des documents<input type="file" multiple hidden accept="${Docs.ACCEPT}" data-up="${d.id}"></label>
         <button type="button" class="btn outline sm" data-ren="${d.id}">Renommer</button> <button type="button" class="btn danger sm" data-ddel="${d.id}">Supprimer</button></span></div>
       ${fs.length ? `<table class="data files"><tbody>${fs.map(fileRow).join("")}</tbody></table>` : `<div class="drop-hint">Glissez-déposez des fichiers ici, ou cliquez sur « Ajouter des documents » (PDF, Word, PowerPoint, Excel, ZIP… max. ${Docs.size(Docs.MAX)} par fichier).</div>`}
       <div class="up-status muted" id="up-${d.id}"></div></div>`; };
+    const allDocs = Docs.ofContent(c.id);
+    const unannounced = allDocs.filter((f) => Docs.published(f) && (!c.notifiedAt || (f.publieAt || f.createdAt || "") > c.notifiedAt));
     el.innerHTML = `<div class="page-head"><h1><a href="#" id="c-back" class="back">←</a> ${esc(c.titre)}</h1><div class="toolbar">
-        ${statutPill(c.statut)}
-        ${c.statut === "publie" ? `<button class="btn sm" id="c-notif" title="Message aux étudiants et e-mail aux listes de diffusion">📣 Prévenir les étudiants</button><button class="btn outline sm" data-st="brouillon">Dépublier</button>` : `<button class="btn sm" data-st="publie">Publier</button>`}
+        ${c.statut === "desactive" ? statutPill("desactive") : ""}
+        ${unannounced.length ? `<button class="btn sm" id="c-notif" title="Message aux étudiants et e-mail aux listes de diffusion">📣 Prévenir les étudiants (${unannounced.length} nouveau${unannounced.length > 1 ? "x" : ""})</button>` : ""}
+        ${!allDocs.length && c.statut === "brouillon" && (c.lien || c.description) ? `<button class="btn outline sm" data-st="publie" title="Rend visibles le titre, la description et le lien">Publier la fiche</button>` : ""}
+        ${c.statut === "desactive" ? `<button class="btn outline sm" data-st="${allDocs.some(Docs.published) ? "publie" : "brouillon"}">Réafficher</button>` : `<button class="btn outline sm" data-st="desactive">Masquer</button>`}
         <button class="btn outline sm" id="c-edit">Modifier</button><button class="btn danger sm" id="c-del">Supprimer</button></div></div>
       <p class="muted" style="margin-top:-6px">${esc(UI.moduleLabel(c.module))} · ${(c.sections || []).map((s) => `<span class="pill sec">${s}</span>`).join(" ")}${ctx.profId ? "" : ` · ${esc(UI.profName(c.profId))}`}</p>
       ${c.description ? `<p style="white-space:pre-wrap">${esc(c.description)}</p>` : ""}
       ${c.lien || c.fichier ? `<p>${c.lien ? `<a class="btn outline sm" href="${esc(c.lien)}" target="_blank" rel="noopener">🔗 Lien du contenu</a> ` : ""}${c.fichier ? `<a class="btn outline sm" href="${c.fichier.data}" download="${esc(c.fichier.name)}">📎 ${esc(c.fichier.name)} (ancienne pièce jointe)</a>` : ""}</p>` : ""}
-      ${c.statut !== "publie" ? `<div class="alert info">Ce contenu n'est pas publié : les étudiants ne voient pas encore ses documents.</div>` : ""}
+      ${c.statut === "desactive" ? `<div class="alert warn">Ce contenu est masqué : les étudiants ne voient aucun de ses documents, même publiés.</div>`
+        : `<div class="alert info">Chaque document se publie séparément (bouton « Publier » sur sa ligne). Les documents ajoutés restent <b>non publiés</b> jusqu'à ce que vous les publiiez.${unannounced.length ? " Pensez ensuite à « 📣 Prévenir les étudiants »." : ""}</div>`}
       ${Object.entries(RUBRIQUES).map(([k, v]) => { const ds = dossiers.filter((d) => d.rubrique === k); const n = Docs.ofContent(c.id).filter((f) => f.rubrique === k).length;
         return `<div class="panel rubrique"><div class="panel-h">${RUB_ICO[k]} ${v} <span style="font-weight:400;opacity:.8">${ds.length} sous-dossier(s) · ${n} document(s)</span>
           <button type="button" class="btn sm light" data-newdir="${k}">+ Sous-dossier</button></div>
@@ -178,7 +190,11 @@ function ContentsView(el, ctx) {
 
     $("#c-back", el).onclick = (e) => { e.preventDefault(); st.open = null; draw(); };
     $("#c-edit", el).onclick = () => form(c);
-    if ($("#c-notif", el)) $("#c-notif", el).onclick = () => { if (!UI.confirm("Prévenir les étudiants (messagerie et listes de diffusion) des documents de ce contenu" + (c.notifiedAt ? " ajoutés depuis le dernier envoi" : "") + " ?")) return; notify(c, true); UI.toast("Étudiants prévenus."); };
+    if ($("#c-notif", el)) $("#c-notif", el).onclick = () => { if (!UI.confirm(`Prévenir les étudiants (messagerie et listes de diffusion) de ${unannounced.length} document(s) publié(s) :\n${unannounced.map((f) => "• " + f.nom).join("\n")}`)) return; notify(c, true, unannounced); UI.toast("Étudiants prévenus."); draw(); };
+    $$("[data-pub]", el).forEach((b) => b.onclick = () => { const on = b.dataset.on === "1"; Docs.setPublished(Store.get("fichiers", b.dataset.pub), on, c);
+      UI.toast(on ? "Document publié : visible par les étudiants." : "Document retiré : il n'est plus visible par les étudiants."); draw(); });
+    $$("[data-pubdir]", el).forEach((b) => b.onclick = () => { const fs = Docs.ofFolder(c.id, b.dataset.pubdir).filter((f) => !Docs.published(f));
+      if (!UI.confirm(`Publier les ${fs.length} document(s) non publiés de ce dossier ?`)) return; fs.forEach((f) => Docs.setPublished(f, true, c)); UI.toast(`${fs.length} document(s) publié(s).`); draw(); });
     $("#c-del", el).onclick = () => delContent(c);
     $$("[data-st]", el).forEach((b) => b.onclick = () => { setStatut(c, b.dataset.st); draw(); });
     $$("[data-newdir]", el).forEach((b) => b.onclick = () => dirForm(c, b.dataset.newdir));
@@ -233,16 +249,16 @@ function ContentsView(el, ctx) {
   };
 
   /* Résumé des documents pour l'e-mail : « Cours / Chapitre 1 : cours.pdf, … » */
-  const docsText = (c, since) => {
-    const lines = [];
+  const docsText = (c, only) => {
+    const lines = []; const ids = only ? new Set(only.map((f) => f.id)) : null;
     Object.entries(RUBRIQUES).forEach(([k, v]) => (c.dossiers || []).filter((d) => d.rubrique === k).forEach((d) => {
-      const fs = Docs.ofFolder(c.id, d.id).filter((f) => !since || (f.createdAt || "") > since);
+      const fs = Docs.ofFolder(c.id, d.id).filter((f) => Docs.published(f) && (!ids || ids.has(f.id)));
       if (fs.length) lines.push(`• ${v} / ${d.nom} : ${fs.map((f) => f.nom).join(", ")}`);
     }));
     return lines.join("\n");
   };
-  const notify = (c, update) => {
-    const since = update ? c.notifiedAt : null; const list = docsText(c, since);
+  const notify = (c, update, only) => {
+    const list = docsText(c, only);
     const author = ctx.profId ? UI.profName(ctx.profId) : "Administration";
     (c.sections || []).forEach((sec) => Store.put("messages", {
       module: c.module, section: sec, authorRole: ctx.profId ? "prof" : "admin", authorId: ctx.user.id, authorName: author,
@@ -262,19 +278,16 @@ function ContentsView(el, ctx) {
         <div class="full"><label>Titre</label><input name="titre" required value="${esc(c.titre)}" placeholder="ex. Systèmes embarqués — supports 2026-2027"></div>
         <div class="full"><label>Description (facultatif)</label><textarea name="description">${esc(c.description)}</textarea></div>
         <div class="full"><label>Lien complémentaire (facultatif : Drive, GitHub, vidéo…)</label><input name="lien" type="url" placeholder="https://" value="${esc(c.lien)}"></div>
-        <div><label>Statut</label><select name="statut"><option value="brouillon" ${c.statut === "brouillon" ? "selected" : ""}>Non publié</option><option value="publie" ${c.statut === "publie" ? "selected" : ""}>Publié (visible)</option><option value="desactive" ${c.statut === "desactive" ? "selected" : ""}>Désactivé</option></select></div>
-        <div><label>Sections concernées</label><div class="checks" id="secs"></div></div>
-        <div class="full checks"><label><input type="checkbox" name="notif" checked> Notifier les étudiants par la messagerie lors de la publication</label></div>
-        ${isNew ? `<div class="full"><div class="hint">Après l'enregistrement, vous accédez aux rubriques <b>Cours, TP, TD et Mise à niveau</b> pour créer les sous-dossiers et déposer les documents.</div></div>` : ""}</div>`,
+        <div class="full"><label>Sections concernées</label><div class="checks" id="secs"></div></div>
+        ${isNew ? `<div class="full"><div class="hint">Après l'enregistrement, vous accédez aux rubriques <b>Cours, TP, TD et Mise à niveau</b> pour créer les sous-dossiers et déposer les documents, puis publier chaque document séparément.</div></div>` : ""}</div>`,
       onSubmit: async (f) => {
         const was = c.statut;
         Object.assign(c, { module: f.module.value, titre: f.titre.value.trim(), description: f.description.value.trim(), lien: f.lien.value.trim(),
-          statut: f.statut.value, sections: $$('input[name="sec"]:checked', f).map((i) => i.value) });
+          sections: $$('input[name="sec"]:checked', f).map((i) => i.value) });
         if (!c.sections.length) { UI.toast("Choisissez au moins une section."); return false; }
         if (isNew) { c.profId = ctx.profId || ""; c.createdAt = new Date().toISOString(); }
         c.updatedAt = new Date().toISOString();
         Store.put("contents", c); Docs.syncStatut(c);
-        if (c.statut === "publie" && was !== "publie" && f.notif.checked) notify(c);
         UI.toast("Contenu enregistré."); st.open = c.id; draw();
       }
     });
@@ -296,7 +309,7 @@ function StudentContentsView(el, ctx) {
       <button type="button" class="btn outline sm" data-dl="${f.id}">Télécharger</button></li>`;
     const block = (c) => {
       const rubs = Object.entries(RUBRIQUES).filter(([k]) => !st.rub || st.rub === k).map(([k, v]) => {
-        const ds = (c.dossiers || []).filter((d) => d.rubrique === k).map((d) => ({ d, fs: Docs.ofFolder(c.id, d.id).filter((f) => !q || f.nom.toLowerCase().includes(q) || d.nom.toLowerCase().includes(q)) })).filter((x) => x.fs.length);
+        const ds = (c.dossiers || []).filter((d) => d.rubrique === k).map((d) => ({ d, fs: Docs.ofFolder(c.id, d.id).filter((f) => Docs.published(f) && (!q || f.nom.toLowerCase().includes(q) || d.nom.toLowerCase().includes(q))) })).filter((x) => x.fs.length);
         return ds.length ? `<div class="s-rub"><div class="s-rub-h">${RUB_ICO[k]} ${v}</div>${ds.map(({ d, fs }) => `<details class="s-dir" open><summary>📁 ${esc(d.nom)} <span class="muted">(${fs.length})</span></summary><ul class="s-files">${fs.map(fileLi).join("")}</ul></details>`).join("")}</div>` : "";
       }).join("");
       const legacy = !st.rub && (c.lien || c.fichier);

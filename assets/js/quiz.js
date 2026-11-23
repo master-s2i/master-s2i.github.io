@@ -20,33 +20,44 @@ const QZ_STATUT = { brouillon: '<span class="pill draft">Brouillon</span>', publ
 
 /* ---------- Service d'IA (API compatible OpenAI : OpenRouter, Alibaba Cloud Model Studio, …) ---------- */
 const IA_PRESETS = {
+  gemini: { nom: "Google Gemini (AI Studio) — gratuit, sans carte bancaire", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash",
+    aide: "Créez une clé gratuite sur aistudio.google.com › « Get API key » (compte Google, sans carte bancaire). Quota gratuit limité par jour ; sur l'offre gratuite, Google peut utiliser les textes envoyés pour améliorer ses produits.",
+    models: [["gemini-3.8-flash", "Gemini 3.8 Flash — gratuit"], ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite — gratuit, plus rapide"]] },
+  groq: { nom: "Groq — Qwen gratuit, très rapide", baseUrl: "https://api.groq.com/openai/v1", model: "qwen/qwen3.8-27b", maxText: 14000, maxTokens: 3500,
+    aide: "Créez une clé gratuite sur console.groq.com › API Keys. L'offre gratuite limite le volume par minute : documents courts et une douzaine de questions au plus par génération.",
+    models: [["qwen/qwen3.8-27b", "Qwen 3.8 27B — gratuit (préversion)"], ["openai/gpt-oss-120b", "GPT-OSS 120B — gratuit"]] },
   openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "google/gemma-4-31b-it:free",
-    aide: "Créez un compte sur openrouter.ai, puis une clé dans « Keys ». Les modèles se terminant par « :free » sont gratuits (avec une limite de requêtes par jour)." },
+    aide: "Créez un compte sur openrouter.ai, puis une clé dans « Keys ». Les modèles se terminant par « :free » sont gratuits (avec une limite de requêtes par jour).",
+    models: [["google/gemma-4-31b-it:free", "Gemma 4 31B — gratuit"], ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra — gratuit"], ["qwen/qwen3-next-80b-a3b-instruct", "Qwen3 Next 80B — payant, très bon marché"]] },
   dashscope: { nom: "Alibaba Cloud Model Studio — Qwen officiel", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus",
-    aide: "Clé API Model Studio (DashScope), région internationale. Modèles : qwen-plus, qwen-max, qwen-turbo…" },
-  custom: { nom: "Autre service compatible OpenAI", baseUrl: "", model: "", aide: "Adresse de base de l'API (se terminant en général par /v1), modèle et clé." }
+    aide: "Clé API Model Studio (DashScope), région internationale. Modèles : qwen-plus, qwen-max, qwen-turbo…", models: [["qwen-plus", "qwen-plus"], ["qwen-max", "qwen-max"]] },
+  ollama: { nom: "Ollama — IA installée sur votre ordinateur (gratuit, hors ligne)", baseUrl: "http://localhost:11434/v1", model: "qwen3:8b", noKey: true,
+    aide: "Installez Ollama (ollama.com), puis dans un terminal : « ollama pull qwen3:8b ». Autorisez le site : variable d'environnement OLLAMA_ORIGINS=https://master-s2i.github.io puis redémarrez Ollama. Fonctionne seulement sur l'ordinateur où Ollama est installé (utilisez « Ma clé personnelle »).",
+    models: [["qwen3:8b", "Qwen3 8B (8 Go de RAM)"], ["qwen3:14b", "Qwen3 14B (16 Go de RAM)"], ["gemma3:12b", "Gemma 3 12B"]] },
+  custom: { nom: "Autre service compatible OpenAI", baseUrl: "", model: "", aide: "Adresse de base de l'API (se terminant en général par /v1), modèle et clé.", models: [] }
 };
 const IA = {
   PERSO: "s2i_ia_perso",
   shared() { return (Store.mode === "firebase" ? Store.data.ia : (Store.settings() || {}).ia) || {}; },
   perso() { try { return JSON.parse(localStorage.getItem(this.PERSO)) || {}; } catch { return {}; } },
-  cfg() { const p = this.perso(); return p.apiKey ? { ...p, perso: true } : this.shared(); },
-  configured() { const c = this.cfg(); return !!(c.apiKey && c.baseUrl && c.model); },
+  cfg() { const p = this.perso(); return p.apiKey || (IA_PRESETS[p.provider] || {}).noKey && p.model ? { ...p, perso: true } : this.shared(); },
+  configured() { const c = this.cfg(); return !!((c.apiKey || (IA_PRESETS[c.provider] || {}).noKey) && c.baseUrl && c.model); },
+  preset() { return IA_PRESETS[this.cfg().provider] || {}; },
   label() { const c = this.cfg(); return c.model ? `${c.model}${c.perso ? " (clé personnelle)" : ""}` : "non configuré"; },
   async saveShared(c) {
     if (Store.mode === "firebase") { await Store.fs.collection("config").doc("ia").set(c); Store.data.ia = c; }
     else { Store.settings().ia = c; Store.saveSettings(); }
   },
-  savePerso(c) { if (c && c.apiKey) localStorage.setItem(this.PERSO, JSON.stringify(c)); else localStorage.removeItem(this.PERSO); },
+  savePerso(c) { if (c && (c.apiKey || (IA_PRESETS[c.provider] || {}).noKey)) localStorage.setItem(this.PERSO, JSON.stringify(c)); else localStorage.removeItem(this.PERSO); },
   async chat(messages) {
     const c = this.cfg();
-    const headers = { "Content-Type": "application/json", Authorization: "Bearer " + c.apiKey };
+    const headers = { "Content-Type": "application/json" }; if (c.apiKey) headers.Authorization = "Bearer " + c.apiKey;
     if (/openrouter\.ai/.test(c.baseUrl)) { headers["HTTP-Referer"] = siteBase(); headers["X-Title"] = "Master S2I - Quiz"; }
     let res;
     try {
       res = await fetch(c.baseUrl.replace(/\/+$/, "") + "/chat/completions", { method: "POST", headers,
-        body: JSON.stringify({ model: c.model, messages, temperature: 0.4, max_tokens: 12000 }) });
-    } catch (e) { throw new Error("le service d'IA est injoignable depuis le navigateur (connexion ou blocage CORS). Essayez OpenRouter."); }
+        body: JSON.stringify({ model: c.model, messages, temperature: 0.4, max_tokens: this.preset().maxTokens || 12000 }) });
+    } catch (e) { throw new Error(c.provider === "ollama" ? "Ollama ne répond pas : vérifiez qu'il est lancé sur cet ordinateur et que OLLAMA_ORIGINS autorise le site." : "le service d'IA est injoignable depuis le navigateur (connexion ou blocage CORS). Essayez Gemini ou OpenRouter."); }
     if (!res.ok) {
       let m = `erreur ${res.status}`;
       try { const j = await res.json(); const er = j.error || j; m += " — " + (er.message || er.code || JSON.stringify(er)).toString().slice(0, 240); } catch { }
@@ -139,18 +150,19 @@ function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const
 
 /* ---------- Paramètres de l'IA (Administration › Paramètres, ou clé personnelle de l'enseignant) ---------- */
 function IASettingsForm(c, { perso } = {}) {
-  const prov = c.provider || "openrouter";
+  const prov = IA_PRESETS[c.provider] ? c.provider : c.apiKey ? "openrouter" : "gemini";
   return `<div class="form-grid">
     <div class="full"><label>Service</label><select name="provider">${Object.entries(IA_PRESETS).map(([k, p]) => `<option value="${k}" ${k === prov ? "selected" : ""}>${esc(p.nom)}</option>`).join("")}</select><div class="hint" id="ia-aide">${esc(IA_PRESETS[prov].aide)}</div></div>
     <div><label>Adresse de l'API</label><input name="baseUrl" value="${esc(c.baseUrl || IA_PRESETS[prov].baseUrl)}" placeholder="https://…/v1"></div>
     <div><label>Modèle</label><input name="model" list="ia-models" value="${esc(c.model || IA_PRESETS[prov].model)}" placeholder="ex. qwen-plus">
-      <datalist id="ia-models"><option value="google/gemma-4-31b-it:free">Gemma 4 31B — gratuit (OpenRouter)</option><option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra — gratuit (OpenRouter)</option><option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B — payant, très bon marché (OpenRouter)</option><option value="qwen-plus">qwen-plus (Model Studio)</option><option value="qwen-max">qwen-max (Model Studio)</option></datalist>
-      <div class="hint">Les modèles gratuits « :free » changent souvent ; si l'un est retiré, choisissez-en un autre dans la liste.</div></div>
-    <div class="full"><label>Clé API</label><input name="apiKey" type="password" autocomplete="off" value="${esc(c.apiKey)}" placeholder="sk-…"><div class="hint">${perso ? "Enregistrée uniquement dans ce navigateur." : "Visible par les enseignants et l'administration uniquement (jamais par les étudiants)."} Fixez une limite de dépense sur le compte du service.</div></div></div>`;
+      <datalist id="ia-models">${(IA_PRESETS[prov].models || []).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}</datalist>
+      <div class="hint">Cliquez dans le champ pour voir les modèles suggérés. Les offres gratuites changent souvent : si un modèle est retiré, choisissez-en un autre.</div></div>
+    <div class="full"><label>Clé API${IA_PRESETS[prov].noKey ? " (inutile pour Ollama)" : ""}</label><input name="apiKey" type="password" autocomplete="off" value="${esc(c.apiKey)}" placeholder="clé du service"><div class="hint">${perso ? "Enregistrée uniquement dans ce navigateur." : "Visible par les enseignants et l'administration uniquement (jamais par les étudiants)."} Fixez une limite de dépense sur le compte du service.</div></div></div>`;
 }
 function bindIAForm(root) {
   const f = root.querySelector('[name="provider"]').form || root;
-  root.querySelector('[name="provider"]').onchange = (e) => { const p = IA_PRESETS[e.target.value]; root.querySelector('[name="baseUrl"]').value = p.baseUrl; root.querySelector('[name="model"]').value = p.model; root.querySelector("#ia-aide").textContent = p.aide; };
+  root.querySelector('[name="provider"]').onchange = (e) => { const p = IA_PRESETS[e.target.value]; root.querySelector('[name="baseUrl"]').value = p.baseUrl; root.querySelector('[name="model"]').value = p.model; root.querySelector("#ia-aide").textContent = p.aide;
+    root.querySelector("#ia-models").innerHTML = (p.models || []).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join(""); };
   return f;
 }
 const readIAForm = (f) => ({ provider: f.provider.value, baseUrl: f.baseUrl.value.trim(), model: f.model.value.trim(), apiKey: f.apiKey.value.trim() });
@@ -162,7 +174,7 @@ async function testIA(btn) {
 }
 function IASettingsCard() {
   return `<div class="card" style="grid-column:1/-1"><h3>Intelligence artificielle (génération des quiz)</h3>
-    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Recommandé : <b>OpenRouter</b> avec un modèle <b>Qwen</b> gratuit, ou <b>Alibaba Cloud Model Studio</b> (Qwen officiel, payant à l'usage). Tout service compatible avec l'API OpenAI fonctionne.</p>
+    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Gratuits : <b>Google Gemini</b> (recommandé), <b>Groq</b> (Qwen), <b>OpenRouter</b> (modèles « :free »), ou <b>Ollama</b> installé sur votre ordinateur. Tout service compatible avec l'API OpenAI fonctionne.</p>
     <form id="iacfg">${IASettingsForm(IA.shared())}<div class="toolbar" style="margin-top:12px"><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="iatest">Tester</button>
       <span class="muted">${IA.shared().apiKey ? "✅ Configuré : " + esc(IA.shared().model) : "Non configuré"}</span></div></form></div>`;
 }
@@ -398,7 +410,7 @@ function QuizView(el, ctx) {
         }
         if (extra) parts.push({ nom: "Texte complémentaire de l'enseignant", lieu: "", t: extra });
         if (!parts.length) throw new Error("aucun texte n'a pu être extrait des documents choisis.");
-        const per = Math.floor(QuizSvc.MAX_TEXT / parts.length); let cut = false;
+        const per = Math.floor((IA.preset().maxText || QuizSvc.MAX_TEXT) / parts.length); let cut = false;
         const corpus = parts.map((p) => { if (p.t.length > per) cut = true; return `### Document : ${p.nom}${p.lieu ? ` (${p.lieu})` : ""}\n${p.t.slice(0, per)}`; }).join("\n\n");
         status.textContent = `⏳ L'IA rédige ${n} question(s) à partir de ${parts.length} document(s)${cut ? " (textes longs : extraits)" : ""}… (jusqu'à une minute)`;
         const diff = { mixte: "un mélange équilibré de questions faciles, moyennes et difficiles", facile: "facile (connaissances, définitions)", moyenne: "moyenne (compréhension)", difficile: "difficile (application, raisonnement, analyse de cas)" }[$("#g-diff", el).value];
