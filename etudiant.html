@@ -46,7 +46,7 @@
           <div class="stat" style="border-left-color:var(--garnet)"><b>${abs}</b><span>Absence(s) non justifiée(s)</span></div>
           <div class="stat"><b>${Notif.unread(user) + Chat.totalUnread(ctxUser, channels)}</b><span>Notification(s) / message(s) non lu(s)</span></div>
           <div class="stat"><b style="font-size:18px">${nextExam ? fmtDate(nextExam.date) : "—"}</b><span>${nextExam ? "Prochain examen : " + esc(nextExam.module) : "Aucun examen programmé"}</span></div></div>
-        ${(() => { const nx = Visio.forSection(sec).filter((v) => v.statut !== "annulee" && !Visio.isPast(v)).slice(0, 3); return nx.length ? `<div class="panel"><div class="panel-h">🎥 Prochaines séances à distance</div><div class="panel-b">${nx.map(visioCard).join("")}<a class="btn outline sm" href="#visio">Toutes les séances à distance</a></div></div>` : ""; })()}
+        ${(() => { const nx = Visio.forStudent(user).filter((v) => v.statut !== "annulee" && !Visio.isPast(v)).slice(0, 3); return nx.length ? `<div class="panel"><div class="panel-h">🎥 Prochaines séances à distance</div><div class="panel-b">${nx.map(visioCard).join("")}<a class="btn outline sm" href="#visio">Toutes les séances à distance</a></div></div>` : ""; })()}
         <div class="panel"><div class="panel-h">📌 Annonces de la coordination</div><div class="panel-b">
           ${(() => { const r = Notif.readSet(user); const l = Notif.forStudent(user).slice(0, 3); return l.length ? l.map((n) => notifCard(n, !r.has(n.id))).join("") : "<p class='muted'>Aucune annonce.</p>"; })()}
           <a class="btn outline sm" href="#notifications">Toutes les notifications</a></div></div>
@@ -81,8 +81,8 @@
         <div class="panel"><div class="panel-h">Détail des séances</div>${ss.length ? `<div class="table-scroll"><table class="data"><thead><tr><th>Date</th><th>Horaire</th><th>Module</th><th>Nature</th><th>Mode</th><th>Statut</th><th>Remarque</th></tr></thead><tbody>
           ${ss.map((s) => { const v = s.records[user.id]; return `<tr><td>${fmtDate(s.date)}</td><td>${s.debut}–${s.fin}</td><td>${esc(s.module)}</td><td>${esc(s.nature)}</td><td>${modePill(s.mode)}</td><td><span class="pill ${v === "P" ? "pub" : v === "A" ? "off" : "draft"}">${label[v]}</span></td><td>${esc((s.comments || {})[user.id] || "")}</td></tr>`; }).join("")}</tbody></table></div>` : `<div class="empty">—</div>`}</div>`;
     }},
-    { id: "visio", label: "Séances à distance", badge: () => Visio.forSection(sec).filter((v) => v.statut !== "annulee" && !Visio.isPast(v) && v.date === todayISO()).length, render: (el) => StudentVisioView(el, sec) },
-    { id: "edt", label: "Emploi du temps", render: (el) => TimetableView(el, { sections: [sec], title: "Emploi du temps — " + sec }) },
+    { id: "visio", label: "Séances à distance", badge: () => Visio.forStudent(user).filter((v) => v.statut !== "annulee" && !Visio.isPast(v) && v.date === todayISO()).length, render: (el) => StudentVisioView(el, user) },
+    { id: "edt", label: "Emploi du temps", render: (el) => TimetableView(el, { sections: [sec], student: user, title: "Emploi du temps — " + sec }) },
     { id: "messagerie", label: "Messagerie", badge: () => Chat.totalUnread(ctxUser, channels), render: (el) => ChatView(el, { user: ctxUser, role: "student", channels, onRead: () => refreshBadges(views) }) },
     { id: "examens", label: "Examens & soutenances", render: (el) => ExamsView(el, { sections: [sec] }) },
     { id: "profil", label: "Mon profil", render: (el) => ProfileView(el, user, "students") }

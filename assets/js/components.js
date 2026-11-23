@@ -262,12 +262,13 @@ function ChatView(el, ctx) {
 }
 
 /* ---------- Emploi du temps par semaine ---------- */
-function TimetableView(el, { sections, profId, title = "Emploi du temps", onWeek }) {
+function TimetableView(el, { sections, profId, student, title = "Emploi du temps", onWeek }) {
   const st = { section: sections[0] };
   const draw = () => {
     const mon = TTWeek.monday;
     const vs = typeof Visio !== "undefined" ? Visio.slots() : [];
-    const rows = [...Store.all("timetable"), ...vs].filter((t) => (profId ? t.profId === profId : t.section === st.section) && slotInWeek(t, mon));
+    const rows = [...Store.all("timetable"), ...vs].filter((t) => (profId ? t.profId === profId : t.section === st.section) && slotInWeek(t, mon)
+      && (!student || !(t.etudiants || []).length || t.etudiants.includes(student.id)));
     const nbDist = rows.filter((r) => r.mode === "distance").length;
     el.innerHTML = `<div class="page-head"><h1>${esc(title)}</h1><div class="toolbar">
         ${!profId && sections.length > 1 ? `<select id="tt-sec" style="width:auto">${sections.map((s) => `<option ${s === st.section ? "selected" : ""}>${s}</option>`).join("")}</select>` : ""}

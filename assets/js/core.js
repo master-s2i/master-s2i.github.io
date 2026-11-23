@@ -328,7 +328,7 @@ const Journal = {
       case "messages": return `${s(o.module) === "ALL" ? "Annonces" : s(o.module)} · ${s(o.section)} : ${s(o.text).slice(0, 90)}`;
       case "contents": return `${s(o.module)} · ${S2I.typesContenu[o.type] || ""} « ${s(o.titre)} »${o.statut ? ` (${({ publie: "publié", brouillon: "non publié", desactive: "désactivé" })[o.statut] || o.statut})` : ""}`;
       case "sessions": { const r = Object.values(o.records || {}); return `${s(o.module)} · ${s(o.section)} · ${fmtDate(o.date)} ${s(o.debut)}${r.length ? ` — ${r.filter((x) => x === "A").length} absent(s) / ${r.length}` : ""}`; }
-      case "visios": return `${s(o.module)} · ${(o.sections || []).join(", ")} · ${fmtDate(o.date)} ${s(o.debut)} « ${s(o.titre)} »${o.statut === "annulee" ? " (annulée)" : ""}`;
+      case "visios": return `${s(o.module)} · ${(o.sections || []).join(", ")}${(o.etudiants || []).length ? ` (${o.etudiants.length} étudiant(s) choisi(s))` : ""} · ${fmtDate(o.date)} ${s(o.debut)} « ${s(o.titre)} »${o.statut === "annulee" ? " (annulée)" : ""}`;
       case "timetable": return `${s(o.section)} · ${S2I.jours[(o.jour || 1) - 1] || ""} ${s(o.debut)}–${s(o.fin)} · ${s(o.module)}`;
       case "students": case "profs": return `${s(o.prenom)} ${s(o.nom)}${o.email ? ` <${s(o.email)}>` : ""}`;
       case "notifications": return `« ${s(o.titre)} »`;
