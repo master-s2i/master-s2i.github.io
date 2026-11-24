@@ -34,6 +34,12 @@ const IA_PRESETS = {
     models: [["google/gemma-4-31b-it:free", "Gemma 4 31B — gratuit"], ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra — gratuit"], ["qwen/qwen3-next-80b-a3b-instruct", "Qwen3 Next 80B — payant, très bon marché"]] },
   dashscope: { nom: "Alibaba Cloud Model Studio — Qwen officiel", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus",
     aide: "Clé API Model Studio (DashScope), région internationale. Modèles : qwen-plus, qwen-max, qwen-turbo…", models: [["qwen-plus", "qwen-plus"], ["qwen-max", "qwen-max"]] },
+  mistral: { nom: "Mistral AI (La Plateforme) — offre gratuite, entreprise française", baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest",
+    aide: "Créez un compte sur console.mistral.ai, activez l'offre gratuite (Experiment / Free, sans carte bancaire, vérification par téléphone), puis créez une clé dans « API Keys ». Sur l'offre gratuite, Mistral peut utiliser les requêtes pour entraîner ses modèles.",
+    models: [["mistral-small-latest", "Mistral Small — rapide"], ["mistral-medium-latest", "Mistral Medium — plus précis"], ["mistral-large-latest", "Mistral Large — le plus précis"]] },
+  webllm: { nom: "Qwen dans le navigateur (WebLLM) — sans clé, sans serveur", baseUrl: "navigateur", model: "Qwen3.5-4B-q4f16_1-MLC", noKey: true, local: true, maxText: 9000, maxTokens: 2500,
+    aide: "Le modèle Qwen est téléchargé une fois (2 à 5 Go, gardé en cache), puis tourne sur la carte graphique de l'ordinateur, dans Chrome ou Edge (WebGPU). Rien n'est envoyé sur Internet. Il faut environ 4 Go (4B) à 6,5 Go (9B) de mémoire graphique. Plus lent et moins précis qu'un service en ligne : textes courts, 5 à 8 questions. À configurer avec « Ma clé personnelle », sur chaque ordinateur.",
+    models: [["Qwen3.5-4B-q4f16_1-MLC", "Qwen3.5 4B (≈ 4 Go de mémoire graphique)"], ["Qwen3.5-9B-q4f16_1-MLC", "Qwen3.5 9B (≈ 6,5 Go, meilleure qualité)"], ["Qwen3.5-2B-q4f16_1-MLC", "Qwen3.5 2B (petits ordinateurs)"]] },
   ollama: { nom: "Ollama — IA installée sur votre ordinateur (gratuit, hors ligne)", baseUrl: "http://localhost:11434/v1", model: "qwen3:8b", noKey: true,
     aide: "Installez Ollama (ollama.com), puis dans un terminal : « ollama pull qwen3:8b ». Autorisez le site : variable d'environnement OLLAMA_ORIGINS=https://master-s2i.github.io puis redémarrez Ollama. Fonctionne seulement sur l'ordinateur où Ollama est installé (utilisez « Ma clé personnelle »).",
     models: [["qwen3:8b", "Qwen3 8B (8 Go de RAM)"], ["qwen3:14b", "Qwen3 14B (16 Go de RAM)"], ["gemma3:12b", "Gemma 3 12B"]] },
@@ -52,8 +58,27 @@ const IA = {
     else { Store.settings().ia = c; Store.saveSettings(); }
   },
   savePerso(c) { if (c && (c.apiKey || (IA_PRESETS[c.provider] || {}).noKey)) localStorage.setItem(this.PERSO, JSON.stringify(c)); else localStorage.removeItem(this.PERSO); },
+  _engine: null, _engineModel: "", onProgress: null,
+  /* Modèle exécuté dans le navigateur (WebLLM, WebGPU) : rien ne quitte l'ordinateur */
+  async chatLocal(c, messages) {
+    if (!navigator.gpu) throw new Error("ce navigateur ne prend pas en charge WebGPU : utilisez Chrome ou Edge récent, sur un ordinateur avec une carte graphique.");
+    const webllm = await import(new URL("assets/js/vendor/web-llm.js", document.baseURI).href);
+    const say = (txt) => { if (this.onProgress) this.onProgress(txt); };
+    if (!this._engine || this._engineModel !== c.model) {
+      say("⏳ Chargement du modèle dans le navigateur (le premier téléchargement peut prendre plusieurs minutes)…");
+      this._engine = await webllm.CreateMLCEngine(c.model, { initProgressCallback: (p) => say(`⏳ ${Math.round((p.progress || 0) * 100)} % — ${p.text || "chargement du modèle"}`) }, { context_window_size: 8192 });
+      this._engineModel = c.model;
+    }
+    say("⏳ Le modèle local rédige les questions…");
+    const r = await this._engine.chat.completions.create({ messages, temperature: 0.4, max_tokens: this.preset().maxTokens || 2500 });
+    return (((r.choices || [])[0] || {}).message || {}).content || "";
+  },
   async chat(messages) {
     const c = this.cfg();
+    if ((IA_PRESETS[c.provider] || {}).local) {
+      try { return await this.chatLocal(c, messages); }
+      catch (e) { const m = String(e.message || e); throw new Error(/WebGPU/.test(m) ? m : /fetch|network|réseau/i.test(m) ? "téléchargement du modèle impossible : une connexion Internet est nécessaire au premier usage (le modèle est ensuite gardé en cache)." : "modèle local : " + m + " (mémoire graphique insuffisante ? essayez un modèle plus petit)"); }
+    }
     if ((IA_PRESETS[c.provider] || {}).native === "anthropic") return this.chatAnthropic(c, messages);
     const headers = { "Content-Type": "application/json" }; if (c.apiKey) headers.Authorization = "Bearer " + c.apiKey;
     if (/openrouter\.ai/.test(c.baseUrl)) { headers["HTTP-Referer"] = siteBase(); headers["X-Title"] = "Master S2I - Quiz"; }
@@ -190,7 +215,7 @@ async function testIA(btn) {
 }
 function IASettingsCard() {
   return `<div class="card" style="grid-column:1/-1"><h3>Intelligence artificielle (génération des quiz)</h3>
-    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Gratuits : <b>Google Gemini</b> (recommandé), <b>Groq</b> (Qwen), <b>OpenRouter</b> (modèles « :free »), ou <b>Ollama</b> installé sur votre ordinateur. Payant à l'usage : <b>Claude (API Anthropic)</b>. Sans aucune clé, chaque enseignant peut aussi utiliser son compte Claude.ai par copier-coller depuis l'onglet Quiz.</p>
+    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Gratuits : <b>Google Gemini</b> (recommandé), <b>Mistral AI</b>, <b>Groq</b> (Qwen), <b>OpenRouter</b> (modèles « :free »), ou sans aucun service en ligne : <b>Qwen dans le navigateur</b> (WebLLM) et <b>Ollama</b> installé sur l'ordinateur. Payant à l'usage : <b>Claude (API Anthropic)</b>. Sans aucune clé, chaque enseignant peut aussi utiliser son compte Claude.ai par copier-coller depuis l'onglet Quiz.</p>
     <form id="iacfg">${IASettingsForm(IA.shared())}<div class="toolbar" style="margin-top:12px"><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="iatest">Tester</button>
       <span class="muted">${IA.shared().apiKey ? "✅ Configuré : " + esc(IA.shared().model) : "Non configuré"}</span></div></form></div>`;
 }
@@ -465,6 +490,7 @@ Réponds uniquement avec un objet JSON valide, sans texte autour, de la forme :
           $("#g-paste-box", el).scrollIntoView({ behavior: "smooth", block: "center" });
           return;
         }
+        IA.onProgress = (m) => { status.textContent = m; };
         const txt = await IA.chat([{ role: "system", content: sys }, { role: "user", content: prompt }]);
         applyAnswer(txt, n, c);
       } catch (e) { console.error(e); status.textContent = "❌ Échec : " + (e.message || e); }
