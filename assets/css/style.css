@@ -402,3 +402,5 @@ b.ok { color: var(--ok); } b.ko { color: var(--danger); }
 .qz-bar i { display: block; height: 100%; }
 
 .folder table.files tr.unpub td:first-child { opacity: .7; }
+
+.qz-paste { margin-top: 12px; border: 1px dashed var(--line); border-radius: 8px; padding: 12px; background: #fbfcfd; }

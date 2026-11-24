@@ -26,6 +26,9 @@ const IA_PRESETS = {
   groq: { nom: "Groq — Qwen gratuit, très rapide", baseUrl: "https://api.groq.com/openai/v1", model: "qwen/qwen3.8-27b", maxText: 14000, maxTokens: 3500,
     aide: "Créez une clé gratuite sur console.groq.com › API Keys. L'offre gratuite limite le volume par minute : documents courts et une douzaine de questions au plus par génération.",
     models: [["qwen/qwen3.8-27b", "Qwen 3.8 27B — gratuit (préversion)"], ["openai/gpt-oss-120b", "GPT-OSS 120B — gratuit"]] },
+  anthropic: { nom: "Claude (API Anthropic) — payant à l'usage", baseUrl: "https://api.anthropic.com/v1", model: "claude-haiku-5-5", native: "anthropic",
+    aide: "Clé API créée sur platform.claude.com (Console), facturée à l'usage, séparément de l'abonnement Claude.ai. Haiku est le plus économique, Sonnet rédige les meilleures questions.",
+    models: [["claude-haiku-5-5", "Claude Haiku 5.5 — rapide et économique"], ["claude-sonnet-5-5", "Claude Sonnet 5.5 — meilleure qualité"]] },
   openrouter: { nom: "OpenRouter — modèles Qwen gratuits et autres", baseUrl: "https://openrouter.ai/api/v1", model: "google/gemma-4-31b-it:free",
     aide: "Créez un compte sur openrouter.ai, puis une clé dans « Keys ». Les modèles se terminant par « :free » sont gratuits (avec une limite de requêtes par jour).",
     models: [["google/gemma-4-31b-it:free", "Gemma 4 31B — gratuit"], ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra — gratuit"], ["qwen/qwen3-next-80b-a3b-instruct", "Qwen3 Next 80B — payant, très bon marché"]] },
@@ -51,6 +54,7 @@ const IA = {
   savePerso(c) { if (c && (c.apiKey || (IA_PRESETS[c.provider] || {}).noKey)) localStorage.setItem(this.PERSO, JSON.stringify(c)); else localStorage.removeItem(this.PERSO); },
   async chat(messages) {
     const c = this.cfg();
+    if ((IA_PRESETS[c.provider] || {}).native === "anthropic") return this.chatAnthropic(c, messages);
     const headers = { "Content-Type": "application/json" }; if (c.apiKey) headers.Authorization = "Bearer " + c.apiKey;
     if (/openrouter\.ai/.test(c.baseUrl)) { headers["HTTP-Referer"] = siteBase(); headers["X-Title"] = "Master S2I - Quiz"; }
     let res;
@@ -69,6 +73,18 @@ const IA = {
     }
     const j = await res.json();
     return (((j.choices || [])[0] || {}).message || {}).content || "";
+  },
+  /* API Messages d'Anthropic, appelée directement depuis le navigateur */
+  async chatAnthropic(c, messages) {
+    let res;
+    try {
+      res = await fetch(c.baseUrl.replace(/\/+$/, "") + "/messages", { method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": c.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: c.model, max_tokens: 12000, temperature: 0.4, system: messages.filter((m) => m.role === "system").map((m) => m.content).join("\n"), messages: messages.filter((m) => m.role !== "system") }) });
+    } catch (e) { throw new Error("l'API Claude est injoignable (connexion)."); }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { const er = (j.error || {}); throw new Error(`erreur ${res.status} — ${er.message || er.type || "API Claude"}${res.status === 401 ? " (clé API refusée)" : res.status === 400 && /credit/i.test(er.message || "") ? " (crédit insuffisant)" : ""}`); }
+    return (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
   },
   parseJSON(txt) {
     let t = String(txt).replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/```(?:json)?/gi, "");
@@ -174,7 +190,7 @@ async function testIA(btn) {
 }
 function IASettingsCard() {
   return `<div class="card" style="grid-column:1/-1"><h3>Intelligence artificielle (génération des quiz)</h3>
-    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Gratuits : <b>Google Gemini</b> (recommandé), <b>Groq</b> (Qwen), <b>OpenRouter</b> (modèles « :free »), ou <b>Ollama</b> installé sur votre ordinateur. Tout service compatible avec l'API OpenAI fonctionne.</p>
+    <p class="muted">Le modèle d'IA rédige les quiz à partir des documents des contenus pédagogiques. Gratuits : <b>Google Gemini</b> (recommandé), <b>Groq</b> (Qwen), <b>OpenRouter</b> (modèles « :free »), ou <b>Ollama</b> installé sur votre ordinateur. Payant à l'usage : <b>Claude (API Anthropic)</b>. Sans aucune clé, chaque enseignant peut aussi utiliser son compte Claude.ai par copier-coller depuis l'onglet Quiz.</p>
     <form id="iacfg">${IASettingsForm(IA.shared())}<div class="toolbar" style="margin-top:12px"><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="iatest">Tester</button>
       <span class="muted">${IA.shared().apiKey ? "✅ Configuré : " + esc(IA.shared().model) : "Non configuré"}</span></div></form></div>`;
 }
@@ -300,7 +316,14 @@ function QuizView(el, ctx) {
           <div class="full"><label>Consigne pour l'IA (facultatif)</label><input id="g-hint" placeholder="ex. insister sur les interruptions et les timers ; inclure des questions de calcul simples"></div></div>
         <div class="toolbar" style="margin-top:12px"><button type="button" class="btn" id="g-go" ${IA.configured() ? "" : "disabled"}>✨ Générer les questions</button>
           <label style="font-weight:400"><input type="checkbox" id="g-add" style="width:auto"> Ajouter aux questions existantes (sinon : remplacer)</label>
+          <button type="button" class="btn outline" id="g-manual" title="Sans clé ni API : la consigne est copiée, vous la collez dans Claude.ai (ou ChatGPT, Gemini…) puis vous collez la réponse ici">📋 Avec mon compte Claude (copier-coller)</button>
           ${ctx.profId ? `<a href="#" id="g-key">${IA.configured() ? "Changer de clé" : "Utiliser ma propre clé"}</a>` : ""}</div>
+        <div id="g-paste-box" class="qz-paste" hidden>
+          <ol class="muted" style="margin:0 0 8px 18px;line-height:1.7"><li>La consigne (avec le texte des documents) est copiée : collez-la dans <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude.ai</a> et envoyez.</li>
+            <li>Quand Claude a terminé, copiez toute sa réponse (bouton « Copier ») et collez-la ci-dessous.</li></ol>
+          <details><summary class="muted" style="cursor:pointer">Voir la consigne</summary><textarea id="g-prompt" readonly style="min-height:140px;font-size:12px;font-family:monospace"></textarea><button type="button" class="btn outline sm" id="g-copy" style="margin-top:6px">Copier à nouveau</button></details>
+          <label style="margin-top:8px">Réponse de Claude</label><textarea id="g-answer" style="min-height:140px;font-family:monospace;font-size:12px" placeholder='{"questions":[ … ]}'></textarea>
+          <div class="toolbar" style="margin-top:8px"><button type="button" class="btn" id="g-import">Importer les questions</button></div></div>
         <div id="g-status" class="muted" style="margin-top:8px"></div></div></div>
       <div class="panel"><div class="panel-h">3. Questions <span id="q-count" style="font-weight:400;opacity:.85"></span><button type="button" class="btn sm light" id="q-addq">+ Ajouter une question</button></div><div class="panel-b" id="q-list"></div></div>
       <div class="panel"><div class="panel-h">4. Paramètres et partage</div><div class="panel-b"><form id="q-form" class="form-grid">
@@ -391,8 +414,9 @@ function QuizView(el, ctx) {
     /* Génération */
     const status = $("#g-status", el);
     if ($("#g-key", el)) $("#g-key", el).onclick = (e) => { e.preventDefault(); iaPersoDialog(() => { $("#g-go", el).disabled = !IA.configured(); }); };
-    $("#g-go", el).onclick = async () => {
-      const btn = $("#g-go", el);
+    let pending = null;
+    const generate = async (manual) => {
+      const btn = manual ? $("#g-manual", el) : $("#g-go", el);
       const c = $("#q-content", el) ? Store.get("contents", $("#q-content", el).value) : null;
       const files = [...sel].map((id) => Store.get("fichiers", id)).filter(Boolean);
       const extra = $("#q-extra", el).value.trim();
@@ -410,7 +434,7 @@ function QuizView(el, ctx) {
         }
         if (extra) parts.push({ nom: "Texte complémentaire de l'enseignant", lieu: "", t: extra });
         if (!parts.length) throw new Error("aucun texte n'a pu être extrait des documents choisis.");
-        const per = Math.floor((IA.preset().maxText || QuizSvc.MAX_TEXT) / parts.length); let cut = false;
+        const per = Math.floor(((manual ? 0 : IA.preset().maxText) || QuizSvc.MAX_TEXT) / parts.length); let cut = false;
         const corpus = parts.map((p) => { if (p.t.length > per) cut = true; return `### Document : ${p.nom}${p.lieu ? ` (${p.lieu})` : ""}\n${p.t.slice(0, per)}`; }).join("\n\n");
         status.textContent = `⏳ L'IA rédige ${n} question(s) à partir de ${parts.length} document(s)${cut ? " (textes longs : extraits)" : ""}… (jusqu'à une minute)`;
         const diff = { mixte: "un mélange équilibré de questions faciles, moyennes et difficiles", facile: "facile (connaissances, définitions)", moyenne: "moyenne (compréhension)", difficile: "difficile (application, raisonnement, analyse de cas)" }[$("#g-diff", el).value];
@@ -430,7 +454,24 @@ ${$("#g-hint", el).value.trim() ? "- Consigne de l'enseignant : " + $("#g-hint",
 Réponds uniquement avec un objet JSON valide, sans texte autour, de la forme :
 {"questions":[{"type":"qcm","enonce":"…","choix":["…","…","…","…"],"bonnes":[0],"explication":"justification courte (1 ou 2 phrases)","source":"nom du document"}]}
 "bonnes" contient les indices (à partir de 0) des bonnes propositions.`;
-        const txt = await IA.chat([{ role: "system", content: "Tu es un enseignant universitaire expert qui rédige des quiz d'évaluation rigoureux en français. Tu réponds uniquement avec du JSON valide." }, { role: "user", content: prompt }]);
+        const sys = "Tu es un enseignant universitaire expert qui rédige des quiz d'évaluation rigoureux en français. Tu réponds uniquement avec du JSON valide.";
+        if (manual) {
+          /* Copier-coller avec un assistant en ligne (Claude.ai, ChatGPT, Gemini…) : aucune clé ni API */
+          const full = `${sys}\n\n${prompt}`; pending = { n, c };
+          try { await navigator.clipboard.writeText(full); } catch { }
+          $("#g-prompt", el).value = full; $("#g-paste-box", el).hidden = false; $("#g-answer", el).value = "";
+          status.innerHTML = `📋 Consigne copiée (${Math.round(full.length / 1000)} 000 caractères${cut ? ", textes longs : extraits" : ""}). Collez-la dans <b>Claude.ai</b> (onglet ouvert), puis collez la réponse de Claude ci-dessous.`;
+          window.open("https://claude.ai/new", "_blank", "noopener");
+          $("#g-paste-box", el).scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+        const txt = await IA.chat([{ role: "system", content: sys }, { role: "user", content: prompt }]);
+        applyAnswer(txt, n, c);
+      } catch (e) { console.error(e); status.textContent = "❌ Échec : " + (e.message || e); }
+      finally { btn.disabled = manual ? false : !IA.configured(); }
+    };
+    const applyAnswer = (txt, n, c) => {
+      {
         const data = IA.parseJSON(txt);
         const qs = (data.questions || []).map((q) => {
           let type = ["qcm", "multi", "vf"].includes(q.type) ? q.type : "qcm";
@@ -441,15 +482,22 @@ Réponds uniquement avec un objet JSON valide, sans texte autour, de la forme :
           if (type === "multi" && bonnes.length === 1) type = "qcm";
           return { id: uid(), type, enonce: String(q.enonce || "").trim(), choix, bonnes, explication: String(q.explication || "").trim(), points: 1, source: String(q.source || "").slice(0, 120) };
         }).filter((q) => q.enonce && q.choix.length >= 2 && q.bonnes.length);
-        if (!qs.length) throw new Error("l'IA n'a renvoyé aucune question exploitable. Réessayez ou changez de modèle.");
+        if (!qs.length) throw new Error("aucune question exploitable dans la réponse. Réessayez ou changez de modèle.");
         S.questions = $("#g-add", el).checked ? [...S.questions, ...qs] : qs;
         if (!form.titre.value.trim()) form.titre.value = `Quiz — ${c ? c.titre : UI.moduleLabel(form.module.value)}`;
         S.source = { contentId: c ? c.id : "", fichiers: [...sel] };
         drawQs();
-        status.innerHTML = `✅ ${qs.length} question(s) générée(s)${qs.length < n ? ` sur ${n} demandées` : ""}. <b>Relisez-les</b> et corrigez-les si besoin avant de publier.`;
+        status.innerHTML = `✅ ${qs.length} question(s) générée(s)${n && qs.length < n ? ` sur ${n} demandées` : ""}. <b>Relisez-les</b> et corrigez-les si besoin avant de publier.`;
         $("#q-list", el).scrollIntoView({ behavior: "smooth", block: "start" });
-      } catch (e) { console.error(e); status.textContent = "❌ Échec : " + (e.message || e); }
-      finally { btn.disabled = !IA.configured(); }
+      }
+    };
+    $("#g-go", el).onclick = () => generate(false);
+    $("#g-manual", el).onclick = () => generate(true);
+    $("#g-copy", el).onclick = async () => { try { await navigator.clipboard.writeText($("#g-prompt", el).value); UI.toast("Consigne copiée."); } catch { $("#g-prompt", el).select(); document.execCommand("copy"); UI.toast("Consigne copiée."); } };
+    $("#g-import", el).onclick = () => {
+      const txt = $("#g-answer", el).value.trim(); if (!txt) return UI.toast("Collez d'abord la réponse de Claude.");
+      try { applyAnswer(txt, pending ? pending.n : 0, pending ? pending.c : null); $("#g-paste-box", el).hidden = true; }
+      catch (e) { status.textContent = "❌ " + (e instanceof SyntaxError ? "la réponse collée n'est pas un JSON complet : copiez toute la réponse de Claude (bouton « Copier » sous sa réponse)." : e.message || e); }
     };
 
     /* Enregistrement */
