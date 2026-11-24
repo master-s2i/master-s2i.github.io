@@ -44,6 +44,7 @@ const Accounts = {
       "auth/email-already-in-use": "Un compte existe déjà pour cet e-mail (à supprimer dans la console Firebase › Authentication, puis réessayer)",
       "auth/invalid-email": "Adresse e-mail invalide",
       "auth/too-many-requests": "Trop de demandes : réessayez plus tard",
+      "auth/quota-exceeded": "Quota quotidien d'e-mails Firebase atteint : compte prêt, e-mail à renvoyer demain",
       "permission-denied": "Action non autorisée (règles Firestore)"
     }[e.code] || (e.message || "Erreur");
   }
@@ -68,19 +69,22 @@ function activateAccountsDialog(items, { title, onClose } = {}) {
     $(`[data-st="${i}"]`, md).innerHTML = {
       pending: '<span class="pill draft">En attente</span>', running: '<span class="pill t-cours">Envoi…</span>',
       created: '<span class="pill pub">Compte créé, e-mail envoyé</span>', sent: '<span class="pill pub">E-mail envoyé</span>',
-      error: `<span class="pill off">${esc(r.err)}</span>`
+      error: `<span class="pill off">${esc(r.err)}</span>`, later: '<span class="pill draft">Reporté (quota atteint) : à renvoyer demain</span>'
     }[r.status];
   };
   rows.forEach((_, i) => paint(i));
   (async () => {
-    let ok = 0, ko = 0;
+    let ok = 0, ko = 0, quota = false;
     for (const [i, r] of rows.entries()) {
+      if (quota) { r.status = "later"; paint(i); continue; }
       r.status = "running"; paint(i);
       try { const res = await Accounts.activate(r.it.kind, r.it.account); r.status = res.created ? "created" : "sent"; ok++; }
-      catch (e) { console.error(e); r.status = "error"; r.err = Accounts.errorText(e); ko++; }
+      catch (e) { console.error(e); r.status = "error"; r.err = Accounts.errorText(e); ko++; if (e.code === "auth/quota-exceeded") quota = true; }
       paint(i);
     }
-    $("#act-sum", md).textContent = `${ok} e-mail(s) envoyé(s)${ko ? `, ${ko} erreur(s)` : ""}. Les personnes doivent cliquer sur le lien reçu (vérifier aussi les courriers indésirables).`;
+    const later = rows.filter((r) => r.status === "later").length;
+    $("#act-sum", md).innerHTML = `${ok} e-mail(s) envoyé(s)${ko ? `, ${ko} erreur(s)` : ""}. Les personnes doivent cliquer sur le lien reçu (vérifier aussi les courriers indésirables).`
+      + (quota ? `<br><b>Quota quotidien de Firebase atteint</b> (e-mails de réinitialisation du mot de passe) : ${later + 1} envoi(s) arrêté(s). Les comptes concernés restent « Non envoyés » ; relancez demain avec « Envoyer aux comptes non envoyés ».` : "");
     UI.toast(`${ok} e-mail(s) d'activation envoyé(s)${ko ? `, ${ko} erreur(s)` : ""}.`);
   })();
 }
