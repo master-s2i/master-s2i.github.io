@@ -164,13 +164,37 @@ function sendCredentialsDialog(items, { title, onClose } = {}) {
 }
 
 /* ---------- Paramètres (Administration) ---------- */
-const GAS_CODE = (token) => `// Relais d'e-mails du Master S2I — envoie depuis votre compte Gmail
+const GAS_CODE = (token) => { const fc = window.FIREBASE_CONFIG || {}; return `// Relais du Master S2I (Google Apps Script, gratuit)
+// 1) envoie les e-mails depuis votre compte Gmail ;
+// 2) supprime de Firebase Authentication les comptes retirés de la plateforme (réservé à l'administrateur).
 const TOKEN = "${token}"; // même jeton que dans la plateforme
+const PROJECT_ID = "${fc.projectId || "VOTRE_PROJET"}";
+const API_KEY = "${fc.apiKey || "VOTRE_CLE_WEB"}";
 
 function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
     if (d.token !== TOKEN) return out({ ok: false, error: "token" });
+    if (d.action === "ping") return out({ ok: true, version: 2 });
+    if (d.action === "deleteUsers" || d.action === "listUsers") {
+      if (!isAdmin_(d.idToken)) return out({ ok: false, error: "réservé à l'administrateur" });
+      if (d.action === "deleteUsers") {
+        const ids = (d.uids || []).filter(String).slice(0, 500);
+        if (!ids.length) return out({ ok: true, deleted: 0 });
+        const r = idt_("/accounts:batchDelete", { localIds: ids, force: true });
+        if (r.error) return out({ ok: false, error: r.error.message });
+        return out({ ok: true, deleted: ids.length - (r.errors || []).length, errors: r.errors || [] });
+      }
+      const users = []; let offset = 0;
+      while (true) {
+        const r = idt_("/accounts:query", { returnUserInfo: true, limit: "500", offset: String(offset) });
+        if (r.error) return out({ ok: false, error: r.error.message });
+        const page = r.userInfo || [];
+        page.forEach(function (u) { users.push({ uid: u.localId, email: u.email || "", created: u.createdAt || "", lastLogin: u.lastLoginAt || "" }); });
+        if (page.length < 500) break; offset += 500;
+      }
+      return out({ ok: true, users: users });
+    }
     const to = String(d.to || "").split(",").map(function (s) { return s.trim(); }).filter(String);
     if (!to.length || to.length > 50) return out({ ok: false, error: "destinataires invalides" });
     if (MailApp.getRemainingDailyQuota() < to.length) return out({ ok: false, error: "quota Gmail du jour atteint" });
@@ -180,7 +204,95 @@ function doPost(e) {
     return out({ ok: true, reste: MailApp.getRemainingDailyQuota() });
   } catch (err) { return out({ ok: false, error: String(err) }); }
 }
-function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`;
+
+// Vérifie que la demande vient d'un administrateur connecté à la plateforme
+function isAdmin_(idToken) {
+  if (!idToken) return false;
+  const r = UrlFetchApp.fetch("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + API_KEY,
+    { method: "post", contentType: "application/json", payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions: true });
+  const u = (JSON.parse(r.getContentText()).users || [])[0];
+  if (!u) return false;
+  const doc = UrlFetchApp.fetch("https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents/users/" + u.localId,
+    { headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken(), "X-Goog-User-Project": PROJECT_ID }, muteHttpExceptions: true });
+  const f = JSON.parse(doc.getContentText()).fields || {};
+  return !!(f.role && f.role.stringValue === "admin");
+}
+function idt_(path, body) {
+  const r = UrlFetchApp.fetch("https://identitytoolkit.googleapis.com/v1/projects/" + PROJECT_ID + path,
+    { method: "post", contentType: "application/json", payload: JSON.stringify(body), muteHttpExceptions: true,
+      headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken(), "X-Goog-User-Project": PROJECT_ID } });
+  return JSON.parse(r.getContentText() || "{}");
+}
+function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`; };
+
+const GAS_MANIFEST = `{
+  "timeZone": "Africa/Casablanca",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/script.send_mail",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/cloud-platform"
+  ],
+  "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE_ANONYMOUS" }
+}`;
+
+/* ---------- Suppression des comptes Firebase Authentication (via le relais Apps Script) ---------- */
+const AuthAdmin = {
+  ready() { return Store.mode === "firebase" && !!Mailer.gas() && Store.me && Store.me.role === "admin"; },
+  async call(action, payload = {}) {
+    const g = Mailer.gas(); if (!g) throw new Error("relais Google Apps Script non configuré");
+    const idToken = await Store.auth.currentUser.getIdToken();
+    let res; try { res = await fetch(g.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ token: g.token, action, idToken, ...payload }) }); }
+    catch (e) { throw new Error("relais injoignable"); }
+    let j = {}; try { j = await res.json(); } catch { throw new Error("réponse inattendue du relais"); }
+    if (!j.ok) throw new Error(/destinataires/.test(j.error || "") ? "le script du relais est une ancienne version : copiez le nouveau code (Administration › Paramètres) et redéployez-le" : j.error || "échec");
+    return j;
+  },
+  _queue: new Set(), _timer: null, _warned: false,
+  /* Appelé à chaque suppression d'un étudiant ou d'un enseignant : regroupe les suppressions (import, suppression en masse) */
+  queueDelete(uid) {
+    if (!uid || Store.mode !== "firebase") return;
+    if (!this.ready()) {
+      if (!this._warned) { this._warned = true; setTimeout(() => UI.toast("Compte retiré de la plateforme. Pour le supprimer aussi de Firebase › Authentication, configurez le relais Google (Administration › Paramètres) puis « Nettoyer les comptes Firebase »."), 400); }
+      return;
+    }
+    this._queue.add(uid); clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.flush(), 800);
+  },
+  async flush() {
+    const uids = [...this._queue]; this._queue.clear(); if (!uids.length) return;
+    try { const r = await this.call("deleteUsers", { uids }); UI.toast(`${r.deleted} compte(s) supprimé(s) de Firebase Authentication.${(r.errors || []).length ? ` ${r.errors.length} échec(s).` : ""}`); }
+    catch (e) { console.error(e); UI.toast("Suppression dans Firebase Authentication impossible : " + e.message + ". Utilisez ensuite « Nettoyer les comptes Firebase »."); }
+  },
+  /* Comptes Firebase qui ne correspondent plus à aucun étudiant, enseignant ou administrateur */
+  async orphans() {
+    const r = await this.call("listUsers");
+    const keep = new Set([...Store.all("students"), ...Store.all("profs")].map((x) => x.uid).filter(Boolean));
+    keep.add(Store.me.uid);
+    const admins = await Store.fs.collection("users").where("role", "==", "admin").get().then((s) => s.docs.map((d) => d.id)).catch(() => []);
+    admins.forEach((u) => keep.add(u));
+    return { all: r.users, orphans: r.users.filter((u) => !keep.has(u.uid)) };
+  }
+};
+function authCleanupDialog() {
+  if (!AuthAdmin.ready()) return UI.toast(Store.mode !== "firebase" ? "Disponible uniquement avec Firebase." : "Configurez d'abord le relais Google Apps Script (ci-dessus) avec le nouveau code.");
+  const md = UI.modal({ title: "Nettoyer les comptes Firebase Authentication", wide: true, submitLabel: "Supprimer les comptes cochés",
+    body: `<p class="muted" id="ac-msg">Recherche des comptes Firebase sans étudiant ni enseignant correspondant…</p><div id="ac-list"></div>`,
+    onSubmit: async (f) => {
+      const uids = $$('input[name="ac"]:checked', f).map((x) => x.value); if (!uids.length) { UI.toast("Aucun compte coché."); return false; }
+      if (!UI.confirm(`Supprimer définitivement ${uids.length} compte(s) de Firebase Authentication ?`)) return false;
+      try { const r = await AuthAdmin.call("deleteUsers", { uids }); UI.toast(`${r.deleted} compte(s) supprimé(s) de Firebase Authentication.`); Journal.log("Nettoyage Firebase Authentication", `${r.deleted} compte(s) supprimé(s)`, { objet: "Comptes" }); }
+      catch (e) { UI.toast("Échec : " + e.message); return false; }
+    } });
+  AuthAdmin.orphans().then(({ all, orphans }) => {
+    $("#ac-msg", md).textContent = orphans.length ? `${orphans.length} compte(s) Firebase sur ${all.length} ne correspondent plus à aucun étudiant ni enseignant de la plateforme :` : `Aucun compte orphelin : les ${all.length} comptes Firebase correspondent tous à la plateforme.`;
+    if (orphans.length) $("#ac-list", md).innerHTML = `<div class="toolbar" style="margin-bottom:6px"><label style="font-weight:400"><input type="checkbox" id="ac-all" checked style="width:auto"> Tout cocher</label></div>
+      <div class="table-scroll" style="max-height:340px;overflow-y:auto"><table class="data"><thead><tr><th></th><th>E-mail</th><th>Créé le</th><th>Dernière connexion</th></tr></thead><tbody>
+      ${orphans.map((u) => `<tr><td><input type="checkbox" name="ac" value="${esc(u.uid)}" checked style="width:auto"></td><td>${esc(u.email || u.uid)}</td><td class="muted">${u.created ? fmtDate(new Date(+u.created).toISOString().slice(0, 10)) : ""}</td><td class="muted">${u.lastLogin ? fmtDate(new Date(+u.lastLogin).toISOString().slice(0, 10)) : "jamais"}</td></tr>`).join("")}</tbody></table></div>`;
+    if ($("#ac-all", md)) $("#ac-all", md).onchange = (e) => $$('input[name="ac"]', md).forEach((x) => (x.checked = e.target.checked));
+  }).catch((e) => { $("#ac-msg", md).textContent = "Échec : " + e.message; });
+}
 
 function GmailRelayCard() {
   const g = Mailer.prive().gas || {}; const token = g.token || randomPassword() + randomPassword();
@@ -188,19 +300,25 @@ function GmailRelayCard() {
     <p class="muted">Gratuit et sans abonnement : les e-mails (identifiants, notifications, listes de diffusion) partent de votre compte Google.
       Limite : 100 destinataires par jour avec un compte gmail.com, 1 500 avec un compte Google Workspace. Prioritaire sur EmailJS s'il est configuré.</p>
     <ol class="muted" style="margin:0 0 10px 18px;line-height:1.7"><li>Ouvrez <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com › Nouveau projet</a> avec le compte Google d'envoi.</li>
-      <li>Remplacez tout le code par celui ci-dessous (bouton « Copier »), puis enregistrez.</li>
-      <li>« Déployer » › « Nouveau déploiement » › type <b>Application Web</b> ; Exécuter en tant que : <b>Moi</b> ; Qui a accès : <b>Tout le monde</b>. Autorisez l'accès à Gmail.</li>
+      <li>Remplacez tout le code par celui ci-dessous (bouton « Copier le code »), puis enregistrez.</li>
+      <li>Pour la suppression des comptes Firebase : ⚙ « Paramètres du projet » › cochez « Afficher le fichier manifeste appsscript.json », puis remplacez le contenu de <b>appsscript.json</b> par le manifeste (bouton « Copier le manifeste »). Utilisez le compte Google <b>propriétaire du projet Firebase</b>.</li>
+      <li>« Déployer » › « Nouveau déploiement » › type <b>Application Web</b> ; Exécuter en tant que : <b>Moi</b> ; Qui a accès : <b>Tout le monde</b>. Autorisez les accès demandés (Gmail, services externes, Google Cloud). Après une mise à jour du code : « Gérer les déploiements » › modifier › <b>Nouvelle version</b>.</li>
       <li>Copiez l'« URL de l'application Web » (se termine par /exec) dans le champ ci-dessous, enregistrez, puis testez.</li></ol>
     <textarea id="gas-code" readonly style="font-family:monospace;font-size:12px;min-height:180px">${esc(GAS_CODE(token))}</textarea>
+    <textarea id="gas-manifest" readonly style="font-family:monospace;font-size:12px;min-height:110px;margin-top:6px">${esc(GAS_MANIFEST)}</textarea>
     <form id="gascfg" class="form-grid" style="margin-top:10px">
       <div class="full"><label>URL de l'application Web</label><input name="url" type="url" value="${esc(g.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
       <input type="hidden" name="token" value="${esc(token)}">
-      <div class="full toolbar"><button type="button" class="btn outline" id="gas-copy">Copier le code</button><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="gas-test">Envoyer un e-mail de test</button>
+      <div class="full toolbar"><button type="button" class="btn outline" id="gas-copy">Copier le code</button><button type="button" class="btn outline" id="gas-copym">Copier le manifeste</button><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="gas-test">Envoyer un e-mail de test</button>
         ${g.url ? `<button type="button" class="btn danger sm" id="gas-off">Désactiver</button>` : ""}<span class="muted">${g.url ? "✅ Relais Gmail configuré" : "Non configuré"}</span></div></form>
+    ${Store.mode === "firebase" ? `<div class="toolbar" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px"><b>Comptes Firebase Authentication</b>
+      <button type="button" class="btn outline" id="gas-clean">🧹 Nettoyer les comptes Firebase</button><span class="muted">Supprime les comptes des étudiants et enseignants retirés de la plateforme. Les suppressions suivantes sont faites automatiquement.</span></div>` : ""}
     <p class="hint">Le jeton dans le code protège le script : seule la plateforme (enseignants et administration) le connaît. Si vous régénérez le code, redéployez le script.</p></div>`;
 }
 function bindGmailRelay(el) {
   const f = $("#gascfg", el); if (!f) return;
+  $("#gas-copym", el).onclick = async () => { try { await navigator.clipboard.writeText(GAS_MANIFEST); UI.toast("Manifeste copié."); } catch { $("#gas-manifest", el).select(); document.execCommand("copy"); UI.toast("Manifeste copié."); } };
+  if ($("#gas-clean", el)) $("#gas-clean", el).onclick = authCleanupDialog;
   $("#gas-copy", el).onclick = async () => { try { await navigator.clipboard.writeText($("#gas-code", el).value); UI.toast("Code copié."); } catch { $("#gas-code", el).select(); document.execCommand("copy"); UI.toast("Code copié."); } };
   f.onsubmit = async (e) => { e.preventDefault(); const url = f.url.value.trim();
     if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return UI.toast("L'adresse doit être l'URL de l'application Web (https://script.google.com/macros/s/…/exec).");

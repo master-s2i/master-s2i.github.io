@@ -120,7 +120,10 @@ const Store = {
     this._persist();
     if (this.mode === "firebase") {
       this.fs.collection(col).doc(String(id)).delete().catch(Store._fbErr);
-      if ((col === "students" || col === "profs") && old && old.uid) this.fs.collection("users").doc(old.uid).delete().catch(Store._fbErr);
+      if ((col === "students" || col === "profs") && old && old.uid) {
+        this.fs.collection("users").doc(old.uid).delete().catch(Store._fbErr);
+        if (typeof AuthAdmin !== "undefined") AuthAdmin.queueDelete(old.uid); // supprime aussi le compte Firebase Authentication
+      }
     }
   },
   settings() { return this.data.settings; },
