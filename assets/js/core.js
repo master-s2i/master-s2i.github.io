@@ -171,6 +171,7 @@ const Store = {
     if (r === "admin" || r === "prof") {
       await Promise.all(COLS.map(async (c) => { this.data[c] = r === "prof" && c === "rappels" ? docs(await this.fs.collection(c).where("profId", "==", this.me.refId).get()) : await col(c).catch((e) => { console.error(c, e); return []; }); }));
       const ia = await this.fs.collection("config").doc("ia").get().catch(() => null); this.data.ia = ia && ia.exists ? ia.data() : {};
+      const pv = await this.fs.collection("config").doc("prive").get().catch(() => null); this.data.prive = pv && pv.exists ? pv.data() : {};
     } else if (r === "student") {
       await Promise.all(["modules", "profs", "timetable", "exams", "soutenances", "notifications", "visios"].map(async (c) => { this.data[c] = await col(c); }));
       const own = await this.fs.collection("students").doc(this.me.refId).get();
@@ -454,7 +455,7 @@ function mountApp(user, roleLabel, views) {
     const id = location.hash.slice(1) || views[0].id;
     let v = views.find((x) => x.id === id) || views[0];
     const fresh = Auth.user();
-    if (Store.mode !== "firebase" && fresh && fresh.mustChange && views.some((x) => x.id === "profil")) v = views.find((x) => x.id === "profil");
+    if (fresh && fresh.mustChange && views.some((x) => x.id === "profil")) v = views.find((x) => x.id === "profil");
     $$(".sidebar a").forEach((a) => a.classList.toggle("active", a.dataset.v === v.id));
     const main = $("#main"); main.innerHTML = "";
     if (Journal._lastView !== v.id) { Journal._lastView = v.id; Journal.log("Consultation", `${roleLabel} › ${v.label.replace(/<[^>]+>/g, "")}`); }

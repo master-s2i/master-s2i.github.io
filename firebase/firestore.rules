@@ -36,7 +36,7 @@ service cloud.firestore {
     // Paramètres généraux (année, sections, modèles d'e-mails…)
     // config/ia (clé du service d'IA) : enseignants et administration seulement
     match /config/{doc} {
-      allow read:  if (signedIn() && doc != "ia") || isStaff();
+      allow read:  if (signedIn() && !(doc in ["ia", "prive"])) || isStaff();
       allow write: if isAdmin();
     }
 
@@ -54,12 +54,15 @@ service cloud.firestore {
     match /profs/{id} {
       allow read:  if signedIn();
       allow write: if isAdmin();
+      // Première connexion : l'enseignant lève lui-même l'obligation de changer son mot de passe provisoire
+      allow update: if isProf() && me().refId == id && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChange"]) && request.resource.data.mustChange == false;
     }
 
     // Un étudiant ne lit que sa propre fiche
     match /students/{id} {
       allow read:  if isStaff() || (isStudent() && me().refId == id);
       allow write: if isAdmin();
+      allow update: if isStudent() && me().refId == id && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["mustChange"]) && request.resource.data.mustChange == false;
     }
 
     match /timetable/{id} {

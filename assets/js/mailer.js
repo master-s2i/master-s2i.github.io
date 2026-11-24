@@ -54,7 +54,15 @@ La coordination du Master S2I – ENSIAS, Université Mohammed V de Rabat`
 
 const Mailer = {
   cfg() { return Store.settings().email || {}; },
-  configured() { const c = this.cfg(); return !!(c.serviceId && c.templateId && c.publicKey); },
+  /* Relais gratuit : script Google Apps Script qui envoie depuis votre Gmail (paramètres réservés aux enseignants et à l'administration) */
+  prive() { return (Store.mode === "firebase" ? Store.data.prive : (Store.settings() || {}).prive) || {}; },
+  gas() { const g = this.prive().gas || {}; return g.url && g.token ? g : null; },
+  emailjsOk() { const c = this.cfg(); return !!(c.serviceId && c.templateId && c.publicKey); },
+  configured() { return !!this.gas() || this.emailjsOk(); },
+  async savePrive(p) {
+    if (Store.mode === "firebase") { await Store.fs.collection("config").doc("prive").set(p); Store.data.prive = p; }
+    else { Store.settings().prive = p; Store.saveSettings(); }
+  },
   siteUrl() {
     return siteBase();
   },
@@ -62,7 +70,7 @@ const Mailer = {
   vars(item) {
     const a = item.account; const isS = item.kind === "student";
     return {
-      prenom: a.prenom || "", nom: a.nom || "", identifiant: a.login, motdepasse: item.password, email: a.email || "",
+      prenom: a.prenom || "", nom: a.nom || "", identifiant: Store.mode === "firebase" ? a.email || a.login : a.login, motdepasse: item.password, email: a.email || "",
       lien: `${this.siteUrl()}connexion.html?role=${isS ? "etudiant" : "prof"}`, site: this.siteUrl(),
       section: isS ? sectionOf(a) : "", promotion: isS ? a.promotion || "—" : "", formation: isS ? S2I.formations[a.formation] : "",
       modules: !isS ? (a.modules || []).map((c) => UI.moduleLabel(c)).join(", ") || "—" : ""
@@ -75,6 +83,17 @@ const Mailer = {
   },
   mailto(m) { return `mailto:${encodeURIComponent(m.to)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`; },
   async sendOne(m) {
+    const g = m.viaEmailjs ? null : this.gas();
+    if (g) {
+      const c = this.cfg(); let res;
+      try { res = await fetch(g.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ token: g.token, to: m.to, subject: m.subject, body: m.body, fromName: c.fromName || "Coordination Master S2I", replyTo: c.replyTo || "" }) }); }
+      catch (e) { throw new Error("script Gmail injoignable (adresse du script incorrecte ou déploiement non public)"); }
+      let j = {}; try { j = await res.json(); } catch { throw new Error("réponse inattendue du script Gmail (vérifiez le déploiement « Application Web »)"); }
+      if (!j.ok) throw new Error(j.error === "token" ? "jeton du script Gmail incorrect" : j.error || "échec de l'envoi Gmail");
+      if (typeof j.reste === "number") this.lastQuota = j.reste;
+      return j;
+    }
     if (!window.emailjs) await loadScript("assets/js/vendor/emailjs.min.js");
     const c = this.cfg();
     return emailjs.send(c.serviceId, c.templateId, {
@@ -105,7 +124,7 @@ function sendCredentialsDialog(items, { title, onClose } = {}) {
   const md = UI.modal({
     title: title || "Envoyer les identifiants par e-mail", wide: true, submitLabel: auto ? `Envoyer ${withMail.length} e-mail(s)` : "Terminé",
     body: `<div class="alert ${auto ? "info" : "warn"}">${auto
-        ? `Envoi automatique via EmailJS à <b>${withMail.length}</b> ${kindLbl}.`
+        ? `Envoi automatique ${Mailer.gas() ? "par votre Gmail (Apps Script, 100 destinataires par jour)" : "via EmailJS"} à <b>${withMail.length}</b> ${kindLbl}.`
         : `L'envoi automatique n'est pas configuré (Administration › Paramètres › Envoi des e-mails). Cliquez sur « Ouvrir l'e-mail » pour chaque destinataire : le message s'ouvre prérempli dans votre messagerie. Pour une liste longue, téléchargez le fichier de publipostage.`}
         ${rows.length - withMail.length ? `<br><b>${rows.length - withMail.length}</b> compte(s) sans adresse e-mail : renseignez-la dans la liste, puis renvoyez les identifiants.` : ""}</div>
       <div class="toolbar" style="margin:12px 0"><button type="button" class="btn outline sm" id="ml-xls">⬇ Fichier de publipostage (Excel)</button>
@@ -123,7 +142,7 @@ function sendCredentialsDialog(items, { title, onClose } = {}) {
         r.status = "sending"; paint(i);
         try { await Mailer.sendOne(r.m); r.status = "sent"; Mailer.markSent(r.it); ok++; }
         catch (e) { r.status = "error"; r.err = (e && (e.text || e.message)) || "erreur"; ko++; }
-        paint(i); await new Promise((res) => setTimeout(res, 1100)); // limite de débit EmailJS
+        paint(i); await new Promise((res) => setTimeout(res, Mailer.gas() ? 300 : 1100)); // limite de débit EmailJS
       }
       UI.toast(`${ok} e-mail(s) envoyé(s)${ko ? `, ${ko} échec(s)` : ""}.`);
       btn.textContent = ko ? `Réessayer (${ko})` : "Terminé"; btn.disabled = false;
@@ -145,9 +164,60 @@ function sendCredentialsDialog(items, { title, onClose } = {}) {
 }
 
 /* ---------- Paramètres (Administration) ---------- */
+const GAS_CODE = (token) => `// Relais d'e-mails du Master S2I — envoie depuis votre compte Gmail
+const TOKEN = "${token}"; // même jeton que dans la plateforme
+
+function doPost(e) {
+  try {
+    const d = JSON.parse(e.postData.contents);
+    if (d.token !== TOKEN) return out({ ok: false, error: "token" });
+    const to = String(d.to || "").split(",").map(function (s) { return s.trim(); }).filter(String);
+    if (!to.length || to.length > 50) return out({ ok: false, error: "destinataires invalides" });
+    if (MailApp.getRemainingDailyQuota() < to.length) return out({ ok: false, error: "quota Gmail du jour atteint" });
+    const opt = { name: String(d.fromName || "Coordination Master S2I").slice(0, 80) };
+    if (d.replyTo) opt.replyTo = String(d.replyTo);
+    MailApp.sendEmail(to.join(","), String(d.subject || "").slice(0, 250), String(d.body || ""), opt);
+    return out({ ok: true, reste: MailApp.getRemainingDailyQuota() });
+  } catch (err) { return out({ ok: false, error: String(err) }); }
+}
+function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`;
+
+function GmailRelayCard() {
+  const g = Mailer.prive().gas || {}; const token = g.token || randomPassword() + randomPassword();
+  return `<div class="card" style="grid-column:1/-1"><h3>Envoi gratuit par votre Gmail (Google Apps Script)</h3>
+    <p class="muted">Gratuit et sans abonnement : les e-mails (identifiants, notifications, listes de diffusion) partent de votre compte Google.
+      Limite : 100 destinataires par jour avec un compte gmail.com, 1 500 avec un compte Google Workspace. Prioritaire sur EmailJS s'il est configuré.</p>
+    <ol class="muted" style="margin:0 0 10px 18px;line-height:1.7"><li>Ouvrez <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com › Nouveau projet</a> avec le compte Google d'envoi.</li>
+      <li>Remplacez tout le code par celui ci-dessous (bouton « Copier »), puis enregistrez.</li>
+      <li>« Déployer » › « Nouveau déploiement » › type <b>Application Web</b> ; Exécuter en tant que : <b>Moi</b> ; Qui a accès : <b>Tout le monde</b>. Autorisez l'accès à Gmail.</li>
+      <li>Copiez l'« URL de l'application Web » (se termine par /exec) dans le champ ci-dessous, enregistrez, puis testez.</li></ol>
+    <textarea id="gas-code" readonly style="font-family:monospace;font-size:12px;min-height:180px">${esc(GAS_CODE(token))}</textarea>
+    <form id="gascfg" class="form-grid" style="margin-top:10px">
+      <div class="full"><label>URL de l'application Web</label><input name="url" type="url" value="${esc(g.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <input type="hidden" name="token" value="${esc(token)}">
+      <div class="full toolbar"><button type="button" class="btn outline" id="gas-copy">Copier le code</button><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="gas-test">Envoyer un e-mail de test</button>
+        ${g.url ? `<button type="button" class="btn danger sm" id="gas-off">Désactiver</button>` : ""}<span class="muted">${g.url ? "✅ Relais Gmail configuré" : "Non configuré"}</span></div></form>
+    <p class="hint">Le jeton dans le code protège le script : seule la plateforme (enseignants et administration) le connaît. Si vous régénérez le code, redéployez le script.</p></div>`;
+}
+function bindGmailRelay(el) {
+  const f = $("#gascfg", el); if (!f) return;
+  $("#gas-copy", el).onclick = async () => { try { await navigator.clipboard.writeText($("#gas-code", el).value); UI.toast("Code copié."); } catch { $("#gas-code", el).select(); document.execCommand("copy"); UI.toast("Code copié."); } };
+  f.onsubmit = async (e) => { e.preventDefault(); const url = f.url.value.trim();
+    if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return UI.toast("L'adresse doit être l'URL de l'application Web (https://script.google.com/macros/s/…/exec).");
+    try { await Mailer.savePrive({ ...Mailer.prive(), gas: url ? { url, token: f.token.value } : null }); UI.toast("Relais Gmail enregistré."); } catch (err) { UI.toast("Échec : " + err.message); } };
+  $("#gas-test", el).onclick = async () => {
+    if (!Mailer.gas()) return UI.toast("Enregistrez d'abord l'URL du script.");
+    const to = prompt("Adresse de test :", Mailer.cfg().replyTo || ""); if (!to) return;
+    try { await Mailer.sendOne({ to, toName: "Test", subject: "Master S2I – e-mail de test (Gmail)", body: "L'envoi des e-mails depuis la plateforme du Master S2I par Gmail fonctionne." });
+      UI.toast(`E-mail de test envoyé à ${to}.${typeof Mailer.lastQuota === "number" ? ` Quota restant aujourd'hui : ${Mailer.lastQuota}.` : ""}`); }
+    catch (err) { UI.toast("Échec : " + err.message); }
+  };
+  if ($("#gas-off", el)) $("#gas-off", el).onclick = async () => { if (!UI.confirm("Désactiver le relais Gmail ?")) return; await Mailer.savePrive({ ...Mailer.prive(), gas: null }); UI.toast("Relais Gmail désactivé."); };
+}
+
 function MailSettingsCards() {
   const c = Mailer.cfg(); const s = Store.settings();
-  return `<div class="card" style="grid-column:1/-1"><h3>Envoi des e-mails (création de compte)</h3>
+  return `${GmailRelayCard()}<div class="card" style="grid-column:1/-1"><h3>Envoi des e-mails (création de compte)</h3>
     <p class="muted">Pour un envoi automatique, créez un compte gratuit sur <a href="https://www.emailjs.com" target="_blank" rel="noopener">emailjs.com</a> (200 e-mails/mois) :
       ajoutez un <i>Email Service</i> (votre Gmail ou Outlook), puis un <i>Email Template</i> dont les champs sont
       <b>To Email</b> = <code>{{to_email}}</code>, <b>Subject</b> = <code>{{subject}}</code>, <b>Content</b> = <code>{{message}}</code>,
@@ -161,7 +231,7 @@ function MailSettingsCards() {
       <div><label>Adresse de réponse</label><input name="replyTo" type="email" value="${esc(c.replyTo)}" placeholder="coordination@…"></div>
       <div><label>Adresse du site (dans les e-mails)</label><input name="siteUrl" type="url" value="${esc(Mailer.siteUrl())}"></div>
       <div class="full toolbar"><button class="btn">Enregistrer</button><button type="button" class="btn outline" id="mailtest">Envoyer un e-mail de test</button>
-        <span class="muted" id="mailstate">${Mailer.configured() ? "✅ Envoi automatique configuré" : "Envoi automatique non configuré"}</span></div></form></div>
+        <span class="muted" id="mailstate">${Mailer.emailjsOk() ? "✅ Envoi automatique configuré" : "Envoi automatique non configuré"}</span></div></form></div>
   <div class="card" style="grid-column:1/-1"><h3>Modèles des e-mails</h3>
     <p class="muted">Champs disponibles : <code>{prenom}</code> <code>{nom}</code> <code>{identifiant}</code> <code>{motdepasse}</code> <code>{lien}</code> <code>{site}</code> <code>{section}</code> <code>{promotion}</code> <code>{formation}</code> <code>{modules}</code></p>
     <form id="mailtpl" class="form-grid">
@@ -170,16 +240,17 @@ function MailSettingsCards() {
       <div class="full toolbar"><button class="btn">Enregistrer les modèles</button><button type="button" class="btn outline" id="tplreset">Revenir aux modèles par défaut</button></div></form></div>`;
 }
 function bindMailSettings(el) {
+  bindGmailRelay(el);
   $("#mailcfg", el).onsubmit = (e) => {
     e.preventDefault(); const f = e.target; const st = Store.settings();
     st.email = { serviceId: f.serviceId.value.trim(), templateId: f.templateId.value.trim(), publicKey: f.publicKey.value.trim(), fromName: f.fromName.value.trim(), replyTo: f.replyTo.value.trim() };
     st.siteUrl = f.siteUrl.value.trim(); Store.saveSettings();
-    $("#mailstate", el).textContent = Mailer.configured() ? "✅ Envoi automatique configuré" : "Envoi automatique non configuré"; UI.toast("Paramètres d'envoi enregistrés.");
+    $("#mailstate", el).textContent = Mailer.emailjsOk() ? "✅ Envoi automatique configuré" : "Envoi automatique non configuré"; UI.toast("Paramètres d'envoi enregistrés.");
   };
   $("#mailtest", el).onclick = async () => {
-    if (!Mailer.configured()) return UI.toast("Renseignez et enregistrez d'abord Service ID, Template ID et Public Key.");
+    if (!Mailer.emailjsOk()) return UI.toast("Renseignez et enregistrez d'abord Service ID, Template ID et Public Key.");
     const to = prompt("Adresse de test :", Mailer.cfg().replyTo || ""); if (!to) return;
-    try { await Mailer.sendOne({ to, toName: "Test", subject: "Master S2I – e-mail de test", body: "L'envoi des e-mails depuis la plateforme du Master S2I fonctionne." }); UI.toast("E-mail de test envoyé à " + to + "."); }
+    try { await Mailer.sendOne({ viaEmailjs: true, to, toName: "Test", subject: "Master S2I – e-mail de test", body: "L'envoi des e-mails depuis la plateforme du Master S2I fonctionne." }); UI.toast("E-mail de test envoyé à " + to + "."); }
     catch (err) { UI.toast("Échec : " + ((err && (err.text || err.message)) || "erreur")); }
   };
   $("#mailtpl", el).onsubmit = (e) => {

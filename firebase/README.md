@@ -31,6 +31,7 @@ Chaque collection Firestore correspond à une fonction du site. L'identifiant du
 | `quiz` | Quiz (sans les bonnes réponses) | `module`, `titre`, `sections[]`, `questions[]` ({`id`, `type`, `enonce`, `choix[]`, `points`}), `ouverture`, `fermeture`, `ouvertureMs`, `fermetureMs`, `duree`, `tentatives`, `corrige`, `statut` (`brouillon`, `publie`, `ferme`), `profId` |
 | `quiz_corriges` | Bonnes réponses et explications d'un quiz (même identifiant que le quiz) | `quizId`, `reponses` {idQuestion: {`bonnes[]`, `explication`}}, `profId`, `module` |
 | `quiz_reponses` | Copies des étudiants (identifiant `idQuiz_idÉtudiant_n`) | `quizId`, `studentId`, `section`, `tentative`, `debut`, `fin`, `reponses` {idQuestion: [indices]} |
+| `config/prive` | Relais d'e-mails Gmail (Apps Script) : adresse et jeton, lisibles par les enseignants et l'administration | `gas` ({`url`, `token`}) |
 | `config/ia` | Service d'IA des quiz (lisible par les enseignants et l'administration) | `provider`, `baseUrl`, `model`, `apiKey` |
 | `messages` | Messagerie par module et section | `module` (`ALL` = annonces), `section`, `authorRole`, `authorId`, `authorUid`, `authorName`, `text`, `date` |
 | `notifications` | Notifications ciblées (Planning) | `titre`, `categorie`, `message`, `lien`, `formation`, `promotions[]`, `annee`, `publishAt` |

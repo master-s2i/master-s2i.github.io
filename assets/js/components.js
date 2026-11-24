@@ -224,7 +224,9 @@ function ExamsView(el, { sections }) {
 /* ---------- Profil : changement de mot de passe ---------- */
 function ProfileView(el, user, col) {
   if (Store.mode === "firebase") {
+    const mustF = (Store.get(col, user.id) || {}).mustChange;
     el.innerHTML = `<div class="page-head"><h1>Mon profil</h1></div>
+      ${mustF ? `<div class="alert warn" style="max-width:520px;margin-bottom:14px">Bienvenue ! Pour sécuriser votre compte, choisissez votre mot de passe avant d'utiliser la plateforme. Le mot de passe actuel est le mot de passe provisoire reçu par e-mail.</div>` : ""}
       <div class="card" style="max-width:520px"><p><b>${esc(user.prenom)} ${esc(user.nom)}</b><br><span class="muted">Connexion : ${esc(Store.me.email)}</span></p>
       <form id="pw" class="form-grid"><div class="full"><label>Mot de passe actuel</label><input type="password" name="old" required autocomplete="current-password"></div>
       <div><label>Nouveau mot de passe</label><input type="password" name="n1" minlength="8" required autocomplete="new-password"></div>
@@ -236,7 +238,10 @@ function ProfileView(el, user, col) {
       try {
         const u = Store.auth.currentUser;
         await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, f.old.value));
+        if (f.n1.value === f.old.value) return UI.toast("Choisissez un mot de passe différent du mot de passe provisoire.");
         await u.updatePassword(f.n1.value); f.reset(); UI.toast("Mot de passe modifié.");
+        if (mustF) { try { await Store.fs.collection(col).doc(String(user.id)).update({ mustChange: false }); } catch (e2) { console.error(e2); }
+          const me = Store.get(col, user.id); if (me) { me.mustChange = false; Store._local(col, me); } setTimeout(() => { location.hash = ""; location.reload(); }, 700); }
       } catch (err) { UI.toast(err.code === "auth/wrong-password" || err.code === "auth/invalid-credential" ? "Mot de passe actuel incorrect." : "Échec : " + err.message); }
     };
     return;
