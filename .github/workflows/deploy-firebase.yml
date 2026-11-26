@@ -41,5 +41,13 @@ jobs:
         run: |
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
-          npx -y firebase-tools@latest deploy --only hosting,firestore:rules --project master-s2i --non-interactive --force
+          npm install -g firebase-tools@latest --no-fund --no-audit --loglevel=error
+          echo "::group::Site (Firebase Hosting)"
+          firebase deploy --only hosting --project master-s2i --non-interactive --force
+          echo "::endgroup::"
+          echo "::group::Règles Firestore"
+          if ! firebase deploy --only firestore:rules --project master-s2i --non-interactive --force; then
+            echo "::warning::Le site est en ligne, mais les règles Firestore n'ont pas été publiées : ajoutez au compte de service les rôles « Firebase Rules Admin » et « Service Usage Consumer » (console Google Cloud › IAM), ou publiez-les à la main dans la console Firebase."
+          fi
+          echo "::endgroup::"
           rm -f "$RUNNER_TEMP/sa.json"
