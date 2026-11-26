@@ -44,9 +44,9 @@ Une section correspond à la formation et à l'année : `TN-1A`, `TAM-1A`, `TN-2
 
 La base Firestore `(default)` est déjà créée (europe-west1, mode production) et la connexion par e-mail/mot de passe est activée. Il reste :
 1. Dans **Authentication › Méthode de connexion › Ajouter un fournisseur › Google**, cliquez sur *Activer*, choisissez votre e-mail d'assistance, puis *Enregistrer*.
-2. Dans **Authentication › Paramètres › Domaines autorisés › Ajouter un domaine**, ajoutez `master-s2i.github.io`.
+2. Dans **Authentication › Paramètres › Domaines autorisés**, vérifiez que `master-s2i.web.app` figure dans la liste (ajouté d'office par Firebase).
 3. Dans **Firestore Database › Règles**, remplacez tout par le contenu de [`firestore.rules`](firestore.rules), puis cliquez sur *Publier*.
-4. Ouvrez la page **https://master-s2i.github.io/firebase/import.html**, cliquez sur *Se connecter avec Google* (compte aissam.berrahou@gmail.com), puis sur *Importer les données*.
+4. Ouvrez la page **(page `firebase/import.html`, à ouvrir en local : elle n'est plus publiée sur le site)**, cliquez sur *Se connecter avec Google* (compte aissam.berrahou@gmail.com), puis sur *Importer les données*.
 
 ## Autre méthode : script Node.js avec clé de compte de service
 
@@ -96,3 +96,18 @@ Dans **⚙ Paramètres du projet › Général › Nom public**, indiquez `Maste
 ## Et ensuite ?
 
 Pour repasser en mode démonstration (données dans le navigateur), mettez `window.FIREBASE_CONFIG = null;` dans `assets/js/firebase-config.js`. Ce même fichier `donnees-initiales.json` peut être chargé dans le site en mode local : Administration › Paramètres › *Restaurer depuis un fichier*. Le mot de passe administrateur est conservé.
+
+## Hébergement sur Firebase Hosting (dépôt GitHub privé)
+
+Le site est publié sur **https://master-s2i.web.app** par Firebase Hosting, ce qui permet de garder le dépôt GitHub **privé**
+(GitHub Pages gratuit n'accepte que les dépôts publics). À chaque modification de `main`, le workflow
+`.github/workflows/deploy-firebase.yml` déploie le site **et publie les règles Firestore** (`firebase/firestore.rules`).
+
+Mise en place (une seule fois) :
+1. Console Firebase › ⚙ Paramètres du projet › **Comptes de service** › *Générer une nouvelle clé privée* (fichier JSON).
+2. GitHub › dépôt › **Settings › Secrets and variables › Actions › New repository secret** :
+   nom `FIREBASE_SERVICE_ACCOUNT`, valeur = tout le contenu du fichier JSON. Supprimez ensuite le fichier de votre ordinateur.
+3. Onglet **Actions** › « Déploiement Firebase » › *Run workflow* (ou poussez une modification). Le site est alors sur https://master-s2i.web.app.
+4. Vérifiez la connexion sur la nouvelle adresse, puis rendez le dépôt privé (Settings › General › Danger Zone › Change visibility).
+
+Le dossier `firebase/` (données initiales, règles, scripts) n'est pas publié sur le site.

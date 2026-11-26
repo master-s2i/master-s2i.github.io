@@ -417,10 +417,11 @@ const UI = {
 };
 
 /* Adresse publique du site (utilisée dans les e-mails et les liens d'activation) */
-const SITE_URL = "https://master-s2i.github.io/";
+const SITE_URL = "https://master-s2i.web.app/";
 function siteBase() {
   let u = (Store.settings() || {}).siteUrl || "";
-  if (!u || /aissamberrahou\.github\.io\/master-s2i/.test(u)) u = /github\.io$/.test(location.hostname) ? SITE_URL : location.href.replace(/[^/]*([?#].*)?$/, "");
+  /* Anciennes adresses (GitHub Pages) : remplacées par l'hébergement Firebase */
+  if (!u || /github\.io/.test(u)) u = /(github\.io|web\.app|firebaseapp\.com)$/.test(location.hostname) ? SITE_URL : location.href.replace(/[^/]*([?#].*)?$/, "");
   return u.endsWith("/") ? u : u + "/";
 }
 

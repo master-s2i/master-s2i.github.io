@@ -1,0 +1,45 @@
+# Déploie la plateforme sur Firebase Hosting (https://master-s2i.web.app) et publie les règles Firestore
+# à chaque modification de la branche main. Nécessite le secret FIREBASE_SERVICE_ACCOUNT
+# (clé JSON d'un compte de service du projet master-s2i) dans Settings › Secrets and variables › Actions.
+name: Déploiement Firebase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: firebase-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la clé du compte de service
+        id: cle
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "absente=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secret FIREBASE_SERVICE_ACCOUNT absent : déploiement ignoré."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.cle.outputs.absente != '1'
+        with:
+          node-version: 22
+
+      - name: Déployer le site et les règles Firestore
+        if: steps.cle.outputs.absente != '1'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx -y firebase-tools@latest deploy --only hosting,firestore:rules --project master-s2i --non-interactive --force
+          rm -f "$RUNNER_TEMP/sa.json"

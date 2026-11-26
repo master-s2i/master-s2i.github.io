@@ -41,7 +41,7 @@ const IA_PRESETS = {
     aide: "Le modèle Qwen est téléchargé une fois (2 à 5 Go, gardé en cache), puis tourne sur la carte graphique de l'ordinateur, dans Chrome ou Edge (WebGPU). Rien n'est envoyé sur Internet. Il faut environ 4 Go (4B) à 6,5 Go (9B) de mémoire graphique. Plus lent et moins précis qu'un service en ligne : textes courts, 5 à 8 questions. À configurer avec « Ma clé personnelle », sur chaque ordinateur.",
     models: [["Qwen3.5-4B-q4f16_1-MLC", "Qwen3.5 4B (≈ 4 Go de mémoire graphique)"], ["Qwen3.5-9B-q4f16_1-MLC", "Qwen3.5 9B (≈ 6,5 Go, meilleure qualité)"], ["Qwen3.5-2B-q4f16_1-MLC", "Qwen3.5 2B (petits ordinateurs)"]] },
   ollama: { nom: "Ollama — IA installée sur votre ordinateur (gratuit, hors ligne)", baseUrl: "http://localhost:11434/v1", model: "qwen3:8b", noKey: true,
-    aide: "Installez Ollama (ollama.com), puis dans un terminal : « ollama pull qwen3:8b ». Autorisez le site : variable d'environnement OLLAMA_ORIGINS=https://master-s2i.github.io puis redémarrez Ollama. Fonctionne seulement sur l'ordinateur où Ollama est installé (utilisez « Ma clé personnelle »).",
+    aide: "Installez Ollama (ollama.com), puis dans un terminal : « ollama pull qwen3:8b ». Autorisez le site : variable d'environnement OLLAMA_ORIGINS=https://master-s2i.web.app puis redémarrez Ollama. Fonctionne seulement sur l'ordinateur où Ollama est installé (utilisez « Ma clé personnelle »).",
     models: [["qwen3:8b", "Qwen3 8B (8 Go de RAM)"], ["qwen3:14b", "Qwen3 14B (16 Go de RAM)"], ["gemma3:12b", "Gemma 3 12B"]] },
   custom: { nom: "Autre service compatible OpenAI", baseUrl: "", model: "", aide: "Adresse de base de l'API (se terminant en général par /v1), modèle et clé.", models: [] }
 };
